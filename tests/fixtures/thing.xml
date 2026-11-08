@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<items termsofuse="https://boardgamegeek.com/xmlapi/termsofuse">
+  <item type="boardgame" id="174430">
+    <thumbnail>https://cf.geekdo-images.com/thumb.jpg</thumbnail>
+    <image>https://cf.geekdo-images.com/original.jpg</image>
+    <name type="primary" sortindex="1" value="Gloomhaven" />
+    <name type="alternate" sortindex="1" value="Gloomhaven (alt)" />
+    <yearpublished value="2017" />
+    <minplayers value="1" />
+    <maxplayers value="4" />
+    <playingtime value="120" />
+    <minplaytime value="60" />
+    <maxplaytime value="120" />
+    <minage value="14" />
+    <link type="boardgamecategory" id="1022" value="Adventure" />
+    <link type="boardgamecategory" id="1010" value="Fantasy" />
+    <link type="boardgamemechanic" id="2023" value="Cooperative Game" />
+    <link type="boardgamemechanic" id="3005" value="I Cut, You Choose" />
+    <link type="boardgamedesigner" id="69802" value="Isaac Childres" />
+    <statistics page="1">
+      <ratings>
+        <usersrated value="63000" />
+        <average value="8.58" />
+        <bayesaverage value="8.33" />
+        <ranks>
+          <rank type="subtype" id="1" name="boardgame" friendlyname="Board Game Rank" value="3" bayesaverage="8.33" />
+          <rank type="family" id="5497" name="strategygames" friendlyname="Strategy Game Rank" value="3" bayesaverage="8.29" />
+        </ranks>
+        <owned value="99000" />
+        <averageweight value="3.91" />
+      </ratings>
+    </statistics>
+  </item>
+  <item type="boardgame" id="999">
+    <name type="primary" sortindex="1" value="Unranked Thing" />
+    <yearpublished value="0" />
+    <statistics page="1">
+      <ratings>
+        <usersrated value="0" />
+        <average value="0" />
+        <bayesaverage value="0" />
+        <ranks>
+          <rank type="subtype" id="1" name="boardgame" value="Not Ranked" />
+        </ranks>
+        <owned value="3" />
+        <averageweight value="0" />
+      </ratings>
+    </statistics>
+  </item>
+  <item type="boardgameexpansion" id="1000">
+    <name type="primary" sortindex="1" value="An Expansion" />
+  </item>
+</items>
