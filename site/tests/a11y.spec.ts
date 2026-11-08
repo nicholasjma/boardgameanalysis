@@ -7,6 +7,8 @@ const WCAG = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22aa', 'best-prac
 for (const theme of themes) {
 	test.describe(`${theme} theme`, () => {
 		test('axe finds no WCAG 2.2 AA violations', async ({ page }) => {
+			// A full scan visits ~13k chart marks: ~10 s locally, ~28 s on a CI runner.
+			test.setTimeout(120_000);
 			await load(page, theme);
 			const { violations } = await new AxeBuilder({ page }).withTags(WCAG).analyze();
 			const summary = violations.map((v) => ({
@@ -19,6 +21,7 @@ for (const theme of themes) {
 		});
 
 		test('axe passes with the game drawer and command palette open', async ({ page }) => {
+			test.setTimeout(60_000);
 			await load(page, theme);
 			await page.getByRole('button', { name: /search and commands/i }).click();
 			await expect(page.getByRole('dialog', { name: 'Command menu' })).toBeVisible();

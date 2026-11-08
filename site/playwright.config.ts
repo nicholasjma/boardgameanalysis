@@ -5,7 +5,8 @@ export default defineConfig({
 	testDir: 'tests',
 	fullyParallel: true,
 	forbidOnly: !!process.env.CI,
-	retries: process.env.CI ? 1 : 0,
+	// No retries: a test that only passes on a second try is a failure we want to see.
+	retries: 0,
 	reporter: process.env.CI ? [['github'], ['list']] : 'list',
 	use: { baseURL: 'http://localhost:4173', trace: 'retain-on-failure' },
 	projects: [
