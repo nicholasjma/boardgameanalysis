@@ -11,7 +11,7 @@
 
 	type Item = {
 		id: string;
-		group: 'Games' | 'Sections' | 'Traits' | 'Actions';
+		group: 'Games' | 'On the 3D map' | 'Sections' | 'Traits' | 'Actions';
 		label: string;
 		hint?: string;
 		keywords?: string;
@@ -90,6 +90,19 @@
 		run: () => openGame(g.id)
 	}));
 
+	const mapItems: Item[] = data.games
+		.filter((g) => g.umap)
+		.map((g) => ({
+			id: `m-${g.id}`,
+			group: 'On the 3D map',
+			label: `${g.name}: similar games`,
+			hint: 'fly to it',
+			run: () => {
+				ui.mapGame = g.id;
+				goToSection('space');
+			}
+		}));
+
 	const traitItems: Item[] = data.traits.map((t) => ({
 		id: `t-${t.key}`,
 		group: 'Traits',
@@ -125,6 +138,7 @@
 				.map((x) => x.it);
 		return [
 			...pick(gameItems, 7),
+			...pick(mapItems, 2),
 			...pick(sectionItems, 4),
 			...pick(traitItems, 4),
 			...pick(actionItems, 4)
@@ -132,7 +146,7 @@
 	});
 
 	const groups = $derived(
-		(['Games', 'Sections', 'Traits', 'Actions'] as const)
+		(['Games', 'On the 3D map', 'Sections', 'Traits', 'Actions'] as const)
 			.map((g) => ({ name: g, items: results.filter((r) => r.group === g) }))
 			.filter((g) => g.items.length)
 	);
@@ -276,9 +290,11 @@
 				<kbd aria-hidden="true">Esc</kbd>
 			</div>
 			<div id="cmd-list" role="listbox" aria-label="Results" class="list">
-				{#each groups as g (g.name)}
-					<div role="group" aria-labelledby="cmd-h-{g.name}">
-						<div class="group" id="cmd-h-{g.name}" role="presentation">{g.name}</div>
+				{#each groups as g, gi (g.name)}
+					<div role="group" aria-labelledby="cmd-h-{gi}">
+						<div class="group" id="cmd-h-{gi}" role="presentation">
+							{g.name}
+						</div>
 						{#each g.items as item (item.id)}
 							{@const i = flat.indexOf(item)}
 							<!-- svelte-ignore a11y_click_events_have_key_events -->

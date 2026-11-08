@@ -35,6 +35,16 @@ for (const theme of themes) {
 			expect(res.violations.map((v) => v.id)).toEqual([]);
 		});
 
+		test('3D map panel with a game selected passes axe and contrast', async ({ page }) => {
+			await load(page, theme);
+			await page.getByRole('combobox', { name: 'Fly to a game' }).fill('Brass');
+			await page.getByRole('combobox', { name: 'Fly to a game' }).press('Enter');
+			await expect(page.locator('#space .sim')).toHaveCount(10);
+			const res = await new AxeBuilder({ page }).include('#space').withTags(WCAG).analyze();
+			expect(res.violations.map((v) => v.id)).toEqual([]);
+			expect(await textContrast(page)).toEqual([]);
+		});
+
 		test('all visible text, including chart labels, meets WCAG contrast', async ({ page }) => {
 			await load(page, theme);
 			expect(await textContrast(page)).toEqual([]);
