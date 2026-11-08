@@ -1,106 +1,57 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick, untrack } from 'svelte';
 	import { prefersReducedMotion } from 'svelte/motion';
-	import { scaleSqrt } from 'd3';
 	import { data, fmt, type Game } from '#lib/data.ts';
-	import { eraIndex, eras, ratingBand, ratingBands } from '#lib/era.ts';
-	import { openGame, ui } from '#lib/state.svelte.ts';
+	import { interpolateLab } from 'd3';
+	import { chapterById, chapterHref, chapters } from '#lib/chapters.ts';
+	import {
+		backToChapter,
+		openChapter,
+		openGame,
+		ui,
+		type MapMode,
+		type Scene
+	} from '#lib/state.svelte.ts';
+	import {
+		box,
+		dotSize,
+		indexById,
+		N_SIMILAR,
+		pts,
+		regions,
+		similarTo,
+		traitCentre,
+		traitIndex,
+		type Vec
+	} from '#lib/space.ts';
 	import Tooltip from '#lib/components/Tooltip.svelte';
+	import Tour from '#lib/components/Tour.svelte';
 
-	type Vec = [number, number, number];
-	type P = { g: Game; p: Vec; near: number[] };
-	type Mode = 'rating' | 'year' | 'trait';
-
-	// --- Data -----------------------------------------------------------------------------------
-	const pts: P[] = data.games
-		.filter((g) => g.umap)
-		.map((g) => ({ g, p: [...(g.umap as [number, number, number])], near: [] }));
-
-	// Fit the bulk of the cloud (2nd–98th percentile on each axis) inside the unit sphere, so a
-	// few outliers don't shrink everything else. Outliers simply sit a little outside the frame.
-	const quantile = (k: number, f: number) => {
-		const v = pts.map((d) => d.p[k]).sort((a, b) => a - b);
-		return v[Math.round(f * (v.length - 1))];
-	};
-	const lo = [0, 1, 2].map((k) => quantile(k, 0.02));
-	const hi = [0, 1, 2].map((k) => quantile(k, 0.98));
-	const half = [0, 1, 2].map((k) => (hi[k] - lo[k]) / 2);
-	const diag = Math.hypot(...half) || 1;
-	for (const d of pts) d.p = d.p.map((v, k) => (v - (lo[k] + hi[k]) / 2) / diag) as Vec;
-	const box = half.map((h) => h / diag);
-
-	// Nearest neighbours in the embedding (brute force: 1,000² distances is cheap).
-	const K = 5;
-	for (const a of pts) {
-		const best: [number, number][] = [];
-		pts.forEach((b, j) => {
-			if (a === b) return;
-			const d = (a.p[0] - b.p[0]) ** 2 + (a.p[1] - b.p[1]) ** 2 + (a.p[2] - b.p[2]) ** 2;
-			if (best.length < K || d < best[K - 1][0]) {
-				best.push([d, j]);
-				best.sort((x, y) => x[0] - y[0]);
-				if (best.length > K) best.pop();
-			}
-		});
-		a.near = best.map(([, j]) => j);
-	}
-	const indexById = new Map(pts.map((p, i) => [p.g.id, i]));
-	const size = scaleSqrt()
-		.domain([0, Math.max(...pts.map((p) => p.g.votes))])
-		.range([2, 7.5]);
-	const traitIndex = new Map(data.traitKeys.map((k, i) => [k, i]));
 	const traits = [...data.traits].sort((a, b) => a.name.localeCompare(b.name));
-
-	/** Shared trait indices of two games (both lists are sorted ascending). */
-	function shared(a: number[], b: number[]): number[] {
-		const out: number[] = [];
-		for (let i = 0, j = 0; i < a.length && j < b.length;) {
-			if (a[i] === b[j]) {
-				out.push(a[i]);
-				i++;
-				j++;
-			} else if (a[i] < b[j]) i++;
-			else j++;
-		}
-		return out;
-	}
-
-	type Similar = { i: number; sim: number; common: number[] };
-	const N_SIMILAR = 10;
-
-	/**
-	 * The games most like pts[i], by Jaccard similarity of their categories and mechanics (the
-	 * same distance the embedding was built from), ties broken by distance on the map.
-	 */
-	function similarTo(i: number): Similar[] {
-		const a = pts[i];
-		return pts
-			.map((b, j) => {
-				const common = shared(a.g.traits, b.g.traits);
-				const union = a.g.traits.length + b.g.traits.length - common.length;
-				const d = (a.p[0] - b.p[0]) ** 2 + (a.p[1] - b.p[1]) ** 2 + (a.p[2] - b.p[2]) ** 2;
-				return { i: j, sim: union ? common.length / union : 0, common, d };
-			})
-			.filter((x) => x.i !== i)
-			.sort((x, y) => y.sim - x.sim || x.d - y.d)
-			.slice(0, N_SIMILAR)
-			.map(({ i, sim, common }) => ({ i, sim, common }));
-	}
+	const snapshot = new Date(`${data.meta.snapshot}-01`).toLocaleDateString('en-US', {
+		month: 'long',
+		year: 'numeric',
+		timeZone: 'UTC'
+	});
 
 	// --- View state -----------------------------------------------------------------------------
 	let canvas: HTMLCanvasElement | undefined = $state();
-	let width = $state(800);
-	const height = $derived(Math.min(640, Math.max(380, width * 0.7)));
-	let mode = $state<Mode>('rating');
+	let panel: HTMLElement | undefined = $state();
+	let selHead: HTMLElement | undefined = $state();
+	let width = $state(1200);
+	let height = $state(800);
+	let mode = $state<MapMode>('rating');
 	let playing = $state(true);
 	let hover = $state<number | null>(null);
 	let tip = $state<{ x: number; y: number } | null>(null);
 
 	const DEFAULT = { yaw: 0.6, pitch: -0.35, zoom: 1 };
+	const ZOOM = [0.6, 9] as const;
 	let yaw = DEFAULT.yaw;
 	let pitch = DEFAULT.pitch;
 	let zoom = $state(DEFAULT.zoom);
-	// The camera eases toward these targets: `center` is the point the view orbits.
+	// The camera orbits `center`, which eases toward `aim`; WASD moves both.
+	let aim: Vec = [0, 0, 0];
 	let center: Vec = [0, 0, 0];
 	let zoomNow = DEFAULT.zoom;
 	let selected = $state<number | null>(null);
@@ -110,23 +61,45 @@
 	let intro = 0; // 0 → 1 as the points fly out from the centre
 	let dirty = true;
 
+	// The map sits behind a chapter while one is open: skip drawing and ignore flying keys.
+	const covered = $derived(ui.pane !== null && !ui.paneHidden);
+	const returnTo = $derived(ui.pane && ui.paneHidden ? chapterById.get(ui.pane) : undefined);
+
 	const traitBit = $derived(traitIndex.get(ui.trait) ?? -1);
 	const traitName = $derived(data.traits.find((t) => t.key === ui.trait)?.name ?? '');
 	const traitCount = $derived(pts.filter((p) => p.g.traits.includes(traitBit)).length);
 	const hoverIdx = $derived(
 		hover ?? (ui.hoverGame !== null ? (indexById.get(ui.hoverGame) ?? null) : null)
 	);
-	// What the map highlights: a hovered game wins over the selection.
-	const focus = $derived(hoverIdx ?? selected);
+	// What the map highlights: the selection stays put while you point at its neighbours;
+	// with nothing selected, hovering a game shows its nearest neighbours.
+	const focus = $derived(selected ?? hoverIdx);
 	const links = $derived(
 		focus === null ? [] : focus === selected ? similar.map((s) => s.i) : pts[focus].near
 	);
 
 	// Anything reactive that changes the picture asks for a redraw.
 	$effect(() => {
-		void [mode, traitBit, focus, links, listHover, zoom, width, height];
+		void [mode, traitBit, focus, links, listHover, hover, zoom, width, height, covered];
 		dirty = true;
 	});
+
+	// Where the cloud is drawn: beside the side panel on wide screens, above the sheet on narrow.
+	const HDR = 56;
+	const wide = $derived(width >= 860);
+	const frame = $derived(
+		wide
+			? {
+					cx: 344 + (width - 344) / 2,
+					cy: HDR + (height - HDR) / 2 + 10,
+					r: Math.min((width - 344) * 0.42, (height - HDR) * 0.42)
+				}
+			: {
+					cx: width / 2,
+					cy: HDR + 44 + (height * 0.56 - HDR - 44) / 2,
+					r: Math.min(width * 0.44, (height * 0.56 - HDR - 44) * 0.5)
+				}
+	);
 
 	// --- Colours (read from CSS so light/dark both work) ----------------------------------------
 	let palette: Record<string, string> = {};
@@ -136,36 +109,87 @@
 		const v = (n: string) => cs.getPropertyValue(n).trim();
 		palette = {
 			surface: v('--surface-1'),
+			page: v('--page'),
+			border: v('--border'),
 			grid: v('--grid') || v('--border'),
 			text: v('--text-primary'),
 			muted: v('--text-secondary'),
+			faint: v('--text-muted'),
 			neutral: v('--neutral-dot'),
 			hi: v('--series-1'),
 			font: getComputedStyle(document.body).fontFamily
 		};
 		for (let i = 1; i <= 5; i++) palette[`ord${i}`] = v(`--ord-${i}`);
+		palette.warm = v('--series-2');
+		palette.hot = v('--div-neg');
+		buildColours();
 		dirty = true;
 	}
 
-	function colorOf(g: Game): string {
-		if (mode === 'rating') return palette[`ord${ratingBand(g.rating)}`];
-		if (mode === 'year') return palette[`ord${eraIndex(g.year) + 1}`];
-		return g.traits.includes(traitBit) ? palette.hi : palette.neutral;
+	// Rating: cool below 8, warm from 8 up, with a sharp step at 8 so the 8+ games jump out.
+	// Year: a quiet ramp from old to new, then orange for the newest releases.
+	const RATING = { lo: 6.9, cut: 8, hi: 8.7 };
+	const YEAR = { lo: 1995, hi: 2023, recent: 2024, newest: 2025 };
+	const newest = (g: Game) => g.year >= YEAR.newest;
+	const newestCount = pts.filter((d) => newest(d.g)).length;
+	/** Drawn last and a little larger, so they sit on top of the cloud. */
+	const standout = (g: Game) =>
+		mode === 'rating' ? g.rating >= RATING.cut : mode === 'year' ? g.year >= YEAR.recent : false;
+
+	function ramp(stops: [number, string][], x: number): string {
+		if (x <= stops[0][0]) return stops[0][1];
+		for (let k = 1; k < stops.length; k++) {
+			const [x1, c1] = stops[k];
+			const [x0, c0] = stops[k - 1];
+			if (x <= x1) return interpolateLab(c0, c1)((x - x0) / (x1 - x0));
+		}
+		return stops[stops.length - 1][1];
+	}
+	let colours: Record<'rating' | 'year', string[]> = { rating: [], year: [] };
+	function buildColours() {
+		const P = palette;
+		colours = {
+			rating: pts.map(({ g }) =>
+				ramp(
+					[
+						[RATING.lo, P.ord1],
+						[RATING.cut - 0.01, P.ord4],
+						[RATING.cut, P.warm],
+						[RATING.hi, P.hot]
+					],
+					g.rating
+				)
+			),
+			year: pts.map(({ g }) =>
+				g.year >= YEAR.newest
+					? P.warm
+					: g.year >= YEAR.recent
+						? interpolateLab(P.surface, P.warm)(0.55)
+						: ramp(
+								[
+									[YEAR.lo, P.ord1],
+									[YEAR.hi, P.ord5]
+								],
+								g.year
+							)
+			)
+		};
 	}
 
-	// --- Projection -----------------------------------------------------------------------------
-	const CAM = 3.4; // camera distance from the origin; the framed bulk lies within radius 1
-	type S = { x: number; y: number; z: number; f: number };
-	let screen: S[] = pts.map(() => ({ x: 0, y: 0, z: 0, f: 1 }));
+	function colorOf(i: number): string {
+		if (mode === 'trait') return pts[i].g.traits.includes(traitBit) ? palette.hi : palette.neutral;
+		return colours[mode][i];
+	}
 
-	function project(
-		p: [number, number, number],
-		t: number,
-		cy: number,
-		cp: number,
-		sy: number,
-		sp: number
-	): S {
+	// --- Camera ---------------------------------------------------------------------------------
+	const CAM = 3.4; // camera distance from `center` at zoom 1; the framed bulk lies within radius 1
+	const NEAR = 0.15; // anything closer to the camera than this is behind it, or too close to draw
+	type S = { x: number; y: number; z: number; f: number; vis: boolean };
+	let screen: S[] = pts.map(() => ({ x: 0, y: 0, z: 0, f: 1, vis: false }));
+	let rot = { cy: 1, sy: 0, cp: 1, sp: 0 };
+
+	function project(p: Vec, t = 1): S {
+		const { cy, sy, cp, sp } = rot;
 		const [x0, y0, z0] = [p[0] * t - center[0], p[1] * t - center[1], p[2] * t - center[2]];
 		const x1 = x0 * cy + z0 * sy; // yaw about the vertical axis
 		const z1 = -x0 * sy + z0 * cy;
@@ -173,23 +197,48 @@
 		const z2 = y0 * sp + z1 * cp;
 		// Zoomed in, the camera also moves closer, so nearby games spread out in depth.
 		const cam = CAM / Math.sqrt(zoomNow);
-		const f = cam / Math.max(0.35, cam - z2);
-		const R = Math.min(width * 0.4, height * 0.5) * zoomNow;
-		return { x: width / 2 + x1 * f * R, y: height / 2 - y2 * f * R, z: z2, f };
+		const depth = cam - z2;
+		if (depth < NEAR) return { x: NaN, y: NaN, z: z2, f: Infinity, vis: false };
+		const f = cam / depth;
+		const R = frame.r * zoomNow;
+		const x = frame.cx + x1 * f * R;
+		const y = frame.cy - y2 * f * R;
+		const vis = x > -60 && x < width + 60 && y > -60 && y < height + 60;
+		return { x, y, z: z2, f, vis };
+	}
+
+	/** A camera-space direction (right, up, toward the viewer) in world coordinates. */
+	function toWorld(x1: number, y2: number, z2: number): Vec {
+		const { cy, sy, cp, sp } = rot;
+		const y0 = y2 * cp + z2 * sp;
+		const z1 = -y2 * sp + z2 * cp;
+		return [x1 * cy - z1 * sy, y0, x1 * sy + z1 * cy];
 	}
 
 	// Dots shrink on small screens so the cloud doesn't turn into a blob, and grow a little with zoom.
-	const baseDot = $derived(Math.max(0.55, Math.min(1, Math.min(width * 0.4, height * 0.5) / 250)));
+	const baseDot = $derived(Math.max(0.55, Math.min(1, frame.r / 250)));
 	let dotScale = 1;
 	const ease = (t: number) => 1 - (1 - t) ** 3;
-	const cube: [number, number, number][] = [-1, 1].flatMap((x) =>
-		[-1, 1].flatMap((y) => [-1, 1].map((z) => [x, y, z] as [number, number, number]))
+	const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
+	const cube: Vec[] = [-1, 1].flatMap((x) =>
+		[-1, 1].flatMap((y) => [-1, 1].map((z) => [x, y, z] as Vec))
 	);
 	const edges = cube.flatMap((a, i) =>
 		cube
 			.map((b, j) => [i, j] as const)
 			.filter(([, j]) => j > i && cube[j].filter((c, k) => c !== a[k]).length === 1)
 	);
+
+	// --- Semantic zoom ------------------------------------------------------------------------
+	// What gets written on the map depends on how close you are: from far away, regions named by
+	// their traits; closer, game names; up close, cards with rank, year and rating; closer still,
+	// the traits each game is built from. `mag` is how much bigger a game looks than at the start.
+	const LEVEL = { name: 1.55, card: 3, detail: 5.2 };
+	const mag = (i: number) => zoomNow * screen[i].f;
+	const regionAlpha = () => (focus !== null ? 0 : clamp01((2.1 - zoomNow) / 0.8));
+	let regionHits: { id: number; b: [number, number, number, number] }[] = [];
+	// Game labels and cards are part of their game: pointing at one points at the game.
+	let labelHits: { i: number; b: [number, number, number, number] }[] = [];
 
 	function draw() {
 		if (!canvas) return;
@@ -201,138 +250,306 @@
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 		ctx.clearRect(0, 0, width, height);
 
-		const [cy, sy, cp, sp] = [Math.cos(yaw), Math.sin(yaw), Math.cos(pitch), Math.sin(pitch)];
+		rot = { cy: Math.cos(yaw), sy: Math.sin(yaw), cp: Math.cos(pitch), sp: Math.sin(pitch) };
 		const t = ease(intro);
 		dotScale = baseDot * Math.min(1.6, Math.sqrt(zoomNow));
 
 		// Reference cube: a faint frame that makes the rotation legible.
-		const corners = cube.map((c) =>
-			project([c[0] * box[0], c[1] * box[1], c[2] * box[2]], 1, cy, cp, sy, sp)
-		);
+		const corners = cube.map((c) => project([c[0] * box[0], c[1] * box[1], c[2] * box[2]]));
 		ctx.strokeStyle = palette.grid;
 		ctx.lineWidth = 1;
 		ctx.beginPath();
 		for (const [i, j] of edges) {
+			if (!Number.isFinite(corners[i].f) || !Number.isFinite(corners[j].f)) continue;
 			ctx.moveTo(corners[i].x, corners[i].y);
 			ctx.lineTo(corners[j].x, corners[j].y);
 		}
 		ctx.stroke();
 
 		// Each point flies out on its own schedule: higher-ranked games arrive first.
-		screen = pts.map((d, i) =>
-			project(d.p, ease(Math.min(1, Math.max(0, t * 1.5 - (i / pts.length) * 0.5))), cy, cp, sy, sp)
-		);
+		screen = pts.map((d, i) => project(d.p, ease(clamp01(t * 1.5 - (i / pts.length) * 0.5))));
 		const order = screen.map((_, i) => i).sort((a, b) => screen[a].z - screen[b].z);
 
 		const traitMode = mode === 'trait';
-		for (const i of order) {
+		// Standouts (8+ ratings, the newest games) go in a second pass, on top of the rest.
+		const top = order.filter((i) => standout(pts[i].g));
+		for (const i of [...order.filter((i) => !standout(pts[i].g)), ...top]) {
 			const s = screen[i];
+			if (!s.vis) continue;
 			const g = pts[i].g;
 			const on = !traitMode || g.traits.includes(traitBit);
+			const big = mode === 'year' && newest(g) ? 1.5 : 1;
 			// Depth cue: far points are smaller and fainter.
-			const depth = Math.max(0, Math.min(1, (s.z + 1) / 2)); // 0 (far) … 1 (near)
-			if (s.f > 6 || s.x < -40 || s.x > width + 40 || s.y < -40 || s.y > height + 40) continue;
+			const depth = clamp01((s.z + 1) / 2); // 0 (far) … 1 (near)
 			ctx.globalAlpha =
-				(on ? 0.55 + 0.45 * depth : 0.25 + 0.2 * depth) * (focus !== null ? 0.7 : 1);
+				(on ? 0.55 + 0.45 * depth : 0.22 + 0.18 * depth) * (focus !== null ? 0.7 : 1);
+			if (big > 1) ctx.globalAlpha = 1;
 			ctx.beginPath();
-			ctx.arc(s.x, s.y, size(g.votes) * s.f * dotScale, 0, Math.PI * 2);
-			ctx.fillStyle = colorOf(g);
+			ctx.arc(s.x, s.y, Math.min(30, dotSize(g.votes) * s.f * dotScale * big), 0, Math.PI * 2);
+			ctx.fillStyle = colorOf(i);
 			ctx.fill();
-			ctx.lineWidth = 1;
-			ctx.strokeStyle = palette.surface;
+			ctx.lineWidth = big > 1 ? 2 : 1;
+			ctx.strokeStyle = big > 1 ? palette.text : palette.surface;
 			ctx.stroke();
 		}
 		ctx.globalAlpha = 1;
 
-		// Focused game: links to its nearest neighbours, then a ring.
-		const labels: { i: number; strong: boolean }[] = [];
-		if (focus !== null) {
+		// Labels keep clear of the floating panels as well as of each other.
+		const placed: [number, number, number, number][] = obstacles();
+		regionHits = [];
+		labelHits = [];
+		if (intro < 1) return;
+
+		// Focused game: links to its most similar games (or nearest neighbours), then rings.
+		if (focus !== null && screen[focus].vis) {
 			const s = screen[focus];
 			ctx.strokeStyle = palette.text;
 			ctx.globalAlpha = 0.55;
 			ctx.lineWidth = 1;
 			ctx.beginPath();
 			for (const j of links) {
+				if (!screen[j].vis) continue;
 				ctx.moveTo(s.x, s.y);
 				ctx.lineTo(screen[j].x, screen[j].y);
-				labels.push({ i: j, strong: false });
 			}
 			ctx.stroke();
 			ctx.globalAlpha = 1;
-			for (const j of links) ring(ctx, j, 1.5);
+			for (const j of links) if (screen[j].vis) ring(ctx, j, 1.5);
 			ring(ctx, focus, 2.5);
-			labels.unshift({ i: focus, strong: true });
-			if (listHover !== null) {
-				ring(ctx, listHover, 3);
-				labels.splice(1, 0, { i: listHover, strong: true });
-			}
-		} else if (intro >= 1) {
-			// A few direct labels: the best-ranked games (in trait mode, the best-ranked matches).
-			const pool = traitMode
-				? pts.map((_, i) => i).filter((i) => pts[i].g.traits.includes(traitBit))
-				: pts.map((_, i) => i);
-			for (const i of pool.slice(0, width < 520 ? 4 : 8)) labels.push({ i, strong: false });
+			if (listHover !== null && screen[listHover].vis) ring(ctx, listHover, 3);
 		}
-		// While the tooltip is up it names the game and its neighbours, so skip canvas labels.
-		drawLabels(ctx, hover !== null ? [] : labels);
+		if (hover !== null && hover !== focus && screen[hover].vis) ring(ctx, hover, 3);
+
+		if (focus !== null) {
+			label(ctx, placed, focus, mag(focus) >= LEVEL.card ? 'card' : 'strong');
+			if (listHover !== null) label(ctx, placed, listHover, 'strong');
+			for (const j of links) label(ctx, placed, j, mag(j) >= LEVEL.card ? 'card' : 'name');
+		}
+
+		// Up close: cards for the nearest games, then names for the most prominent ones in view.
+		const near = screen
+			.map((s, i) => i)
+			.filter((i) => screen[i].vis && mag(i) >= LEVEL.name && (!traitMode || on(i)))
+			.sort((a, b) => mag(b) * dotSize(pts[b].g.votes) - mag(a) * dotSize(pts[a].g.votes));
+		const cards = near.filter((i) => mag(i) >= LEVEL.card).slice(0, wide ? 6 : 3);
+		for (const i of cards) label(ctx, placed, i, 'card');
+		for (const i of near.slice(0, wide ? 22 : 9)) label(ctx, placed, i, 'name');
+
+		if (mode === 'year' && focus === null)
+			for (const i of pts.map((_, i) => i).filter((i) => newest(pts[i].g)))
+				label(ctx, placed, i, 'strong');
+
+		// Far away: name the regions instead.
+		const a = regionAlpha();
+		if (a > 0.02) {
+			ctx.globalAlpha = a;
+			for (const r of regions) {
+				const s = project(r.c);
+				if (!s.vis) continue;
+				const b = regionLabel(ctx, placed, r.name.toUpperCase(), `${r.n} games`, s.x, s.y);
+				if (b) regionHits.push({ id: r.id, b });
+			}
+			ctx.globalAlpha = 1;
+		}
+		function on(i: number) {
+			return pts[i].g.traits.includes(traitBit);
+		}
+	}
+
+	function obstacles(): [number, number, number, number][] {
+		const host = canvas!.getBoundingClientRect();
+		return [...canvas!.parentElement!.querySelectorAll<HTMLElement>('.hud, .panel')].map((el) => {
+			const r = el.getBoundingClientRect();
+			return [
+				r.left - host.left - 4,
+				r.top - host.top - 4,
+				r.right - host.left + 4,
+				r.bottom - host.top + 4
+			];
+		});
 	}
 
 	function ring(ctx: CanvasRenderingContext2D, i: number, w: number) {
 		const s = screen[i];
 		ctx.beginPath();
-		ctx.arc(s.x, s.y, size(pts[i].g.votes) * s.f * dotScale + 3, 0, Math.PI * 2);
+		ctx.arc(s.x, s.y, Math.min(30, dotSize(pts[i].g.votes) * s.f * dotScale) + 3, 0, Math.PI * 2);
 		ctx.strokeStyle = palette.text;
 		ctx.lineWidth = w;
 		ctx.stroke();
 	}
 
-	function drawLabels(ctx: CanvasRenderingContext2D, labels: { i: number; strong: boolean }[]) {
-		const placed: [number, number, number, number][] = [];
+	const overlaps = (b: number[], placed: number[][]) =>
+		placed.some((p) => b[0] < p[2] && b[2] > p[0] && b[1] < p[3] && b[3] > p[1]);
+	const short = (s: string, n: number) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+
+	function label(
+		ctx: CanvasRenderingContext2D,
+		placed: [number, number, number, number][],
+		i: number,
+		kind: 'strong' | 'name' | 'card'
+	) {
+		const s = screen[i];
+		if (!s.vis) return;
+		const g = pts[i].g;
+		const r = Math.min(30, dotSize(g.votes) * s.f * dotScale);
 		ctx.textBaseline = 'middle';
 		ctx.lineJoin = 'round';
-		for (const { i, strong } of labels) {
-			const s = screen[i];
-			ctx.font = `${strong ? 600 : 500} ${strong ? 13 : 12}px ${palette.font}`;
-			const text = pts[i].g.name.length > 32 ? pts[i].g.name.slice(0, 31) + '…' : pts[i].g.name;
-			const w = ctx.measureText(text).width;
-			const left = s.x > width - w - 24;
-			const x = Math.max(4, Math.min(width - w - 4, left ? s.x - 9 - w : s.x + 9));
-			const box: [number, number, number, number] = [x - 2, s.y - 9, x + w + 2, s.y + 9];
-			if (
-				!strong &&
-				placed.some((b) => box[0] < b[2] && box[2] > b[0] && box[1] < b[3] && box[3] > b[1])
-			)
-				continue;
-			placed.push(box);
-			ctx.lineWidth = 4;
-			ctx.strokeStyle = palette.surface;
-			ctx.strokeText(text, x, s.y);
-			ctx.fillStyle = strong ? palette.text : palette.muted;
-			ctx.fillText(text, x, s.y);
+		if (kind === 'card') {
+			const detail = mag(i) >= LEVEL.detail;
+			const lines = [
+				short(g.name, 34),
+				`#${g.rank} · ${g.year} · ${fmt.r2(g.rating)}`,
+				...(detail
+					? [
+							g.traits
+								.slice(0, 3)
+								.map((k) => data.traits[k]?.name)
+								.join(', ')
+						]
+					: [])
+			].map((l, k) => (k === 2 ? short(l, 40) : l));
+			const fonts = [
+				`600 13px ${palette.font}`,
+				`500 11.5px ${palette.font}`,
+				`500 11px ${palette.font}`
+			];
+			const w =
+				Math.max(
+					...lines.map((l, k) => {
+						ctx.font = fonts[k];
+						return ctx.measureText(l).width;
+					})
+				) + 16;
+			const h = 10 + lines.length * 16;
+			const right = s.x + r + 8 + w < width - 4;
+			const x = right ? s.x + r + 8 : Math.max(4, s.x - r - 8 - w);
+			const y = Math.max(HDR + 4, Math.min(height - h - 4, s.y - h / 2));
+			const b: [number, number, number, number] = [x, y, x + w, y + h];
+			if (overlaps(b, placed)) return;
+			placed.push(b);
+			labelHits.push({ i, b });
+			ctx.beginPath();
+			ctx.roundRect(x, y, w, h, 7);
+			ctx.fillStyle = palette.surface;
+			ctx.globalAlpha = 0.94;
+			ctx.fill();
+			ctx.globalAlpha = 1;
+			ctx.strokeStyle = palette.border;
+			ctx.lineWidth = 1;
+			ctx.stroke();
+			lines.forEach((l, k) => {
+				ctx.font = fonts[k];
+				ctx.fillStyle = k === 0 ? palette.text : palette.muted;
+				ctx.fillText(l, x + 8, y + 13 + k * 16);
+			});
+			return;
 		}
+		const strong = kind === 'strong';
+		ctx.font = `${strong ? 600 : 500} ${strong ? 13 : 12}px ${palette.font}`;
+		const text = short(g.name, 32);
+		const w = ctx.measureText(text).width;
+		const left = s.x > width - w - 24;
+		const x = Math.max(4, Math.min(width - w - 4, left ? s.x - r - 6 - w : s.x + r + 6));
+		const b: [number, number, number, number] = [x - 2, s.y - 9, x + w + 2, s.y + 9];
+		if (!strong && overlaps(b, placed)) return;
+		placed.push(b);
+		labelHits.push({ i, b });
+		ctx.lineWidth = 4;
+		ctx.strokeStyle = palette.surface;
+		ctx.strokeText(text, x, s.y);
+		ctx.fillStyle = strong ? palette.text : palette.muted;
+		ctx.fillText(text, x, s.y);
 	}
 
-	// --- Interaction ----------------------------------------------------------------------------
-	let drag = $state<{ x: number; y: number; moved: number } | null>(null);
+	function regionLabel(
+		ctx: CanvasRenderingContext2D,
+		placed: [number, number, number, number][],
+		title: string,
+		sub: string,
+		cx: number,
+		cy: number
+	): [number, number, number, number] | null {
+		ctx.textBaseline = 'middle';
+		ctx.textAlign = 'center';
+		ctx.font = `700 11.5px ${palette.font}`;
+		const w1 = ctx.measureText(title).width;
+		ctx.font = `500 11px ${palette.font}`;
+		const w = Math.max(w1, ctx.measureText(sub).width) + 8;
+		const b: [number, number, number, number] = [cx - w / 2, cy - 15, cx + w / 2, cy + 15];
+		if (overlaps(b, placed)) {
+			ctx.textAlign = 'start';
+			return null;
+		}
+		placed.push(b);
+		ctx.lineWidth = 4;
+		ctx.strokeStyle = palette.surface;
+		ctx.font = `700 11.5px ${palette.font}`;
+		ctx.strokeText(title, cx, cy - 7);
+		ctx.fillStyle = palette.text;
+		ctx.fillText(title, cx, cy - 7);
+		ctx.font = `500 11px ${palette.font}`;
+		ctx.strokeText(sub, cx, cy + 8);
+		ctx.fillStyle = palette.muted;
+		ctx.fillText(sub, cx, cy + 8);
+		ctx.textAlign = 'start';
+		return b;
+	}
 
-	function pick(e: PointerEvent): number | null {
+	// --- Pointer: drag to look, wheel or pinch to zoom, click to select --------------------------
+	let drag = $state<{ x: number; y: number; moved: number } | null>(null);
+	// Plain collections on purpose: read by the animation loop, never rendered.
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
+	const touches = new Map<number, { x: number; y: number }>();
+	let pinch = 0;
+
+	function local(e: { clientX: number; clientY: number }) {
 		const rect = canvas!.getBoundingClientRect();
-		const mx = e.clientX - rect.left;
-		const my = e.clientY - rect.top;
+		return { mx: e.clientX - rect.left, my: e.clientY - rect.top };
+	}
+	function pick(e: PointerEvent): number | null {
+		const { mx, my } = local(e);
 		let best: number | null = null;
 		let bestD = 16 ** 2;
 		screen.forEach((s, i) => {
+			if (!s.vis) return;
 			const d = (s.x - mx) ** 2 + (s.y - my) ** 2 - s.z * 20; // prefer nearer points on ties
 			if (d < bestD) [best, bestD] = [i, d];
 		});
 		return best;
 	}
+	function pickLabel(e: PointerEvent): number | null {
+		const { mx, my } = local(e);
+		const inside = ({ b }: { b: number[] }) => mx >= b[0] && mx <= b[2] && my >= b[1] && my <= b[3];
+		return labelHits.findLast(inside)?.i ?? null;
+	}
+	function pickRegion(e: PointerEvent): number | null {
+		const { mx, my } = local(e);
+		return (
+			regionHits.find(({ b }) => mx >= b[0] && mx <= b[2] && my >= b[1] && my <= b[3])?.id ?? null
+		);
+	}
 
 	function onDown(e: PointerEvent) {
+		touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+		if (touches.size === 2) {
+			const [a, b] = [...touches.values()];
+			pinch = Math.hypot(a.x - b.x, a.y - b.y);
+			drag = null;
+			return;
+		}
 		drag = { x: e.clientX, y: e.clientY, moved: 0 };
 		canvas!.setPointerCapture(e.pointerId);
+		canvas!.style.cursor = ''; // let the grabbing hand show while dragging
 	}
 	function onMove(e: PointerEvent) {
+		if (touches.has(e.pointerId)) touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+		if (touches.size === 2) {
+			const [a, b] = [...touches.values()];
+			const d = Math.hypot(a.x - b.x, a.y - b.y);
+			if (pinch) zoomBy(d / pinch);
+			pinch = d;
+			return;
+		}
 		if (drag) {
 			const dx = e.clientX - drag.x;
 			const dy = e.clientY - drag.y;
@@ -342,51 +559,142 @@
 				hover = null;
 				tip = null;
 				yaw += dx * 0.008;
-				if (e.pointerType === 'mouse') pitch = Math.max(-1.4, Math.min(1.4, pitch + dy * 0.008));
+				pitch = Math.max(-1.4, Math.min(1.4, pitch + dy * 0.008));
 				dirty = true;
 				return;
 			}
 		}
-		hover = pick(e);
-		tip = hover !== null ? { x: screen[hover].x, y: screen[hover].y } : null;
+		if (e.pointerType !== 'mouse') return;
+		// A label already names its game, so pointing at one skips the tooltip.
+		const onLabel = pickLabel(e);
+		hover = onLabel ?? pick(e);
+		tip = hover !== null && onLabel === null ? { x: screen[hover].x, y: screen[hover].y } : null;
+		// Anything you can click gets a pointer; the grab hand is for dragging empty space.
+		canvas!.style.cursor = hover !== null || pickRegion(e) !== null ? 'pointer' : '';
 	}
 	function onUp(e: PointerEvent) {
+		touches.delete(e.pointerId);
+		if (touches.size < 2) pinch = 0;
 		if (drag && drag.moved <= 4) {
-			const i = pick(e);
+			const i = pickLabel(e) ?? pick(e);
+			const r = i === null ? pickRegion(e) : null;
 			if (i !== null) select(i);
+			else if (r !== null) flyToRegion(r);
 		}
 		drag = null;
 	}
-	function onLeave() {
+	function onLeave(e: PointerEvent) {
+		touches.delete(e.pointerId);
 		if (!drag) {
 			hover = null;
 			tip = null;
 		}
 	}
-	function onKey(e: KeyboardEvent) {
-		const step = 0.12;
-		const keys: Record<string, () => void> = {
-			ArrowLeft: () => (yaw -= step),
-			ArrowRight: () => (yaw += step),
-			ArrowUp: () => (pitch = Math.max(-1.4, pitch - step)),
-			ArrowDown: () => (pitch = Math.min(1.4, pitch + step)),
-			'+': () => zoomBy(1.2),
-			'=': () => zoomBy(1.2),
-			'-': () => zoomBy(1 / 1.2),
-			' ': () => (playing = !playing)
-		};
-		if (keys[e.key]) {
+	function onWheel(e: WheelEvent) {
+		e.preventDefault();
+		// Semantic scroll: during the tour, scrolling over the map moves the story on.
+		const story = ui.tour ? panel?.querySelector<HTMLElement>('.tour') : null;
+		if (story) story.scrollBy({ top: e.deltaY * (e.deltaMode === 1 ? 32 : 1) });
+		else zoomBy(Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0015)));
+	}
+
+	// --- Keyboard: WASD to fly, Q/E down and up, arrows to look, +/- to zoom ---------------------
+	// eslint-disable-next-line svelte/prefer-svelte-reactivity
+	const held = new Set<string>();
+	let fast = false;
+	const FLY = new Set([
+		'w',
+		'a',
+		's',
+		'd',
+		'q',
+		'e',
+		'arrowleft',
+		'arrowright',
+		'arrowup',
+		'arrowdown'
+	]);
+
+	function mapKeys(e: KeyboardEvent) {
+		if (covered || ui.game !== null || ui.palette) return false;
+		if (e.ctrlKey || e.metaKey || e.altKey) return false;
+		const t = e.target;
+		return !(
+			t instanceof HTMLElement &&
+			(t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))
+		);
+	}
+	function onWinKeyDown(e: KeyboardEvent) {
+		if (!mapKeys(e)) return;
+		const k = e.key.toLowerCase();
+		fast = e.shiftKey;
+		if (FLY.has(k)) {
 			e.preventDefault();
-			if (e.key.startsWith('Arrow')) playing = false;
-			keys[e.key]();
-			dirty = true;
+			if (!held.has(k) && !e.repeat) move(k, 0.06); // a tap still nudges
+			held.add(k);
+			playing = false;
+		} else if (k === '+' || k === '=') {
+			e.preventDefault();
+			zoomBy(1.2);
+		} else if (k === '-' || k === '_') {
+			e.preventDefault();
+			zoomBy(1 / 1.2);
+		} else if (k === '[' || k === ']') {
+			e.preventDefault();
+			stepRank(k === ']' ? 1 : -1);
+		} else if (
+			k === 'escape' &&
+			e.target instanceof Node &&
+			canvas?.parentElement?.contains(e.target)
+		) {
+			if (ui.tour) exitTour();
+			else if (selected !== null) clearSelection();
 		}
 	}
-	const zoomBy = (k: number) => (zoom = Math.max(0.6, Math.min(6, zoom * k)));
+	function onWinKeyUp(e: KeyboardEvent) {
+		held.delete(e.key.toLowerCase());
+		fast = e.shiftKey;
+	}
+	function onCanvasKey(e: KeyboardEvent) {
+		if (e.key === ' ') {
+			e.preventDefault();
+			playing = !playing;
+		}
+	}
+
+	/** Apply one key's motion for `dt` seconds. */
+	function move(k: string, dt: number) {
+		const look = 1.5 * dt;
+		if (k === 'arrowleft') yaw -= look;
+		else if (k === 'arrowright') yaw += look;
+		else if (k === 'arrowup') pitch = Math.max(-1.4, pitch - look);
+		else if (k === 'arrowdown') pitch = Math.min(1.4, pitch + look);
+		else {
+			const dir: Record<string, Vec> = {
+				w: [0, 0, -1],
+				s: [0, 0, 1],
+				a: [-1, 0, 0],
+				d: [1, 0, 0],
+				q: [0, -1, 0],
+				e: [0, 1, 0]
+			};
+			const v = toWorld(...dir[k]);
+			const step = ((fast ? 2.5 : 1) * 0.9 * dt) / Math.sqrt(zoomNow);
+			const next = aim.map((a, i) => a + v[i] * step) as Vec;
+			const r = Math.hypot(...next);
+			const lim = 2.2;
+			aim = r > lim ? (next.map((x) => (x * lim) / r) as Vec) : next;
+			center = center.map((c, i) => c + (aim[i] - c) * 0.9) as Vec;
+		}
+		dirty = true;
+	}
+
+	const zoomBy = (k: number) => (zoom = Math.max(ZOOM[0], Math.min(ZOOM[1], zoom * k)));
 	function reset() {
 		yaw = DEFAULT.yaw;
 		pitch = DEFAULT.pitch;
 		zoom = DEFAULT.zoom;
+		aim = [0, 0, 0];
 		selected = null;
 		dirty = true;
 	}
@@ -395,26 +703,92 @@
 	/** Fly to a game and list the games most like it. */
 	function select(i: number) {
 		selected = i;
+		listHover = null;
+		ui.hoverGame = null;
+		aim = [...pts[i].p];
 		zoom = Math.max(zoom, 4);
 		playing = false;
 		announce = `Showing ${pts[i].g.name} and its ${N_SIMILAR} most similar games`;
 		dirty = true;
 	}
+	// The ranking, walkable on the map: the top-100 list, prev/next on a selection, and [ / ].
+	const byRank = pts.map((_, i) => i).sort((a, b) => pts[a].g.rank - pts[b].g.rank);
+	const rankPos = $derived(selected === null ? -1 : byRank.indexOf(selected));
+	const prevRanked = $derived(rankPos > 0 ? byRank[rankPos - 1] : null);
+	const nextRanked = $derived(
+		rankPos >= 0 && rankPos < byRank.length - 1 ? byRank[rankPos + 1] : null
+	);
+	function stepRank(d: 1 | -1) {
+		if (selected === null) return select(byRank[0]);
+		const i = d > 0 ? nextRanked : prevRanked;
+		if (i !== null) select(i);
+	}
+
+	/** Leave the selected game and land back on its row in the top-100 list. */
+	function backToList() {
+		const id = selected !== null ? pts[selected].g.id : null;
+		clearSelection();
+		tick().then(() => {
+			const row = panel?.querySelector<HTMLElement>(`.top100 [data-id="${id}"]`);
+			const target = row ?? panel?.querySelector<HTMLElement>('.top100 button');
+			target?.scrollIntoView({ block: 'nearest' });
+			target?.focus({ preventScroll: true });
+		});
+	}
+
 	function clearSelection() {
 		selected = null;
 		zoom = DEFAULT.zoom;
+		aim = [0, 0, 0];
 		announce = 'Selection cleared';
 		dirty = true;
 	}
+	function flyToRegion(id: number) {
+		const r = regions.find((x) => x.id === id);
+		if (!r) return;
+		selected = null;
+		aim = [...r.c];
+		zoom = Math.max(zoom, 2.6);
+		playing = false;
+		announce = `Zoomed in on ${r.name}: ${r.n} games`;
+		dirty = true;
+	}
 
-	// Other components (the game drawer, the command palette) can ask the map to show a game.
+	// Other components (the game drawer, the palette, the rankings) can ask the map to show a game.
 	$effect(() => {
 		const id = ui.mapGame;
 		if (id === null) return;
 		ui.mapGame = null;
 		const i = indexById.get(id);
-		if (i !== undefined) select(i);
+		if (i === undefined) return;
+		untrack(() => select(i));
+		tick().then(() => selHead?.focus({ preventScroll: true }));
 	});
+
+	// The tour sets scenes as the reader scrolls through it.
+	function applyScene(s: Scene) {
+		if (s.mode) mode = s.mode;
+		if (s.trait) ui.trait = s.trait;
+		if (s.game === null) selected = null;
+		else if (s.game !== undefined) {
+			const i = indexById.get(s.game);
+			if (i !== undefined) select(i);
+		}
+		if (s.aimTrait && s.trait) aim = traitCentre(s.trait);
+		else if (s.game === null) aim = [0, 0, 0];
+		if (s.zoom !== undefined) zoom = s.zoom;
+		playing = (s.spin ?? false) && !prefersReducedMotion.current;
+		dirty = true;
+	}
+	$effect(() => {
+		const s = ui.scene;
+		if (s) untrack(() => applyScene(s));
+	});
+	function exitTour() {
+		ui.tour = false;
+		applyScene({ mode: 'rating', game: null, zoom: 1, spin: true });
+		tick().then(() => panel?.querySelector<HTMLElement>('.start')?.focus());
+	}
 
 	// --- Search ---------------------------------------------------------------------------------
 	let q = $state('');
@@ -462,10 +836,9 @@
 	const pct = (x: number) => `${Math.round(x * 100)}%`;
 	const nameOfTrait = (k: number) => data.traits[k]?.name ?? '';
 
-	// --- Lifecycle: animate only while on screen ------------------------------------------------
+	// --- Lifecycle ------------------------------------------------------------------------------
 	onMount(() => {
-		const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-		if (reduced) {
+		if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
 			playing = false;
 			intro = 1;
 		}
@@ -477,297 +850,406 @@
 		});
 		const mq = matchMedia('(prefers-color-scheme: dark)');
 		mq.addEventListener('change', readPalette);
-
-		let visible = false;
-		let started = false;
-		const io = new IntersectionObserver(
-			([e]) => {
-				visible = e.isIntersecting;
-				if (visible) started = true;
-			},
-			{ threshold: 0.15 }
-		);
-		io.observe(canvas!);
+		canvas!.addEventListener('wheel', onWheel, { passive: false });
+		const clear = () => held.clear();
+		window.addEventListener('blur', clear);
 
 		let raf = 0;
 		let last = performance.now();
-		const tick = (now: number) => {
+		const tickFrame = (now: number) => {
 			const raw = (now - last) / 1000;
-			const dt = Math.min(0.064, raw); // cap rotation steps after a stall
+			const dt = Math.min(0.064, raw); // cap steps after a stall
 			last = now;
-			if (visible) {
-				if (started && intro < 1) {
+			if (!covered && !document.hidden) {
+				if (intro < 1) {
 					intro = Math.min(1, intro + Math.min(0.25, raw) / 1.6);
 					dirty = true;
 				}
+				for (const k of held) move(k, dt);
 				if (playing && !drag) {
 					yaw += dt * 0.12;
 					dirty = true;
 				}
-				// Ease the camera toward the selected game (or back to the middle).
-				const target: Vec = selected !== null ? pts[selected].p : [0, 0, 0];
+				// Ease the camera toward its aim and zoom.
 				const k = prefersReducedMotion.current ? 1 : 1 - Math.exp(-raw * 5);
-				const dc = Math.hypot(...target.map((v, i) => v - center[i]));
+				const dc = Math.hypot(...aim.map((v, i) => v - center[i]));
 				if (dc > 1e-4 || Math.abs(zoom - zoomNow) > 1e-3) {
-					center = center.map((v, i) => v + (target[i] - v) * k) as Vec;
+					center = center.map((v, i) => v + (aim[i] - v) * k) as Vec;
 					zoomNow += (zoom - zoomNow) * k;
 					dirty = true;
 				}
 				if (dirty) {
 					dirty = false;
 					draw();
-					if (hover !== null) tip = { x: screen[hover].x, y: screen[hover].y };
+					// Keep an open tooltip pinned to its moving dot.
+					if (hover !== null && tip)
+						tip = screen[hover].vis ? { x: screen[hover].x, y: screen[hover].y } : null;
 				}
 			}
-			raf = requestAnimationFrame(tick);
+			raf = requestAnimationFrame(tickFrame);
 		};
-		raf = requestAnimationFrame(tick);
+		raf = requestAnimationFrame(tickFrame);
 		return () => {
 			cancelAnimationFrame(raf);
-			io.disconnect();
 			mo.disconnect();
 			mq.removeEventListener('change', readPalette);
+			canvas?.removeEventListener('wheel', onWheel);
+			window.removeEventListener('blur', clear);
 		};
 	});
-
-	const tableRows = pts.slice(0, 1000);
 </script>
 
-<div class="controls">
-	<div class="seg" role="group" aria-label="Colour points by">
-		<span class="lbl">Colour by</span>
-		<button class="chip" aria-pressed={mode === 'rating'} onclick={() => (mode = 'rating')}
-			>Rating</button
-		>
-		<button class="chip" aria-pressed={mode === 'year'} onclick={() => (mode = 'year')}>Year</button
-		>
-		<button class="chip" aria-pressed={mode === 'trait'} onclick={() => (mode = 'trait')}
-			>A trait</button
-		>
-	</div>
-	{#if mode === 'trait'}
-		<label>
-			<span class="visually-hidden">Highlight a category or mechanic</span>
-			<select bind:value={ui.trait}>
-				<optgroup label="Mechanics">
-					{#each traits.filter((t) => t.kind === 'mechanic') as t (t.key)}
-						<option value={t.key}>{t.name}</option>
-					{/each}
-				</optgroup>
-				<optgroup label="Categories">
-					{#each traits.filter((t) => t.kind === 'category') as t (t.key)}
-						<option value={t.key}>{t.name}</option>
-					{/each}
-				</optgroup>
-			</select>
-		</label>
-	{/if}
-	<div class="view" role="group" aria-label="View controls">
-		<button class="chip" aria-pressed={playing} onclick={() => (playing = !playing)}>
-			{playing ? 'Pause' : 'Rotate'}
-		</button>
-		<button class="chip icon" aria-label="Zoom in" onclick={() => zoomBy(1.25)}>+</button>
-		<button class="chip icon" aria-label="Zoom out" onclick={() => zoomBy(1 / 1.25)}>−</button>
-		<button class="chip" onclick={reset}>Reset</button>
-	</div>
-</div>
+<svelte:window onkeydown={onWinKeyDown} onkeyup={onWinKeyUp} />
 
-<ul class="legend">
-	{#if mode === 'rating'}
-		<li class="ttl">Average rating</li>
-		{#each ratingBands as b, i (b.label)}
-			<li><span class="swatch dot" style:background="var(--ord-{i + 1})"></span>{b.label}</li>
-		{/each}
-	{:else if mode === 'year'}
-		<li class="ttl">Year published</li>
-		{#each eras as e, i (e.label)}
-			<li><span class="swatch dot" style:background="var(--ord-{i + 1})"></span>{e.label}</li>
-		{/each}
-	{:else}
-		<li>
-			<span class="swatch dot" style:background="var(--series-1)"></span>{traitName} ({traitCount})
-		</li>
-		<li><span class="swatch dot" style:background="var(--neutral-dot)"></span>Other games</li>
+<section
+	id="space"
+	class="space"
+	aria-label="3D map of the top {pts.length} games"
+	bind:clientWidth={width}
+	bind:clientHeight={height}
+	inert={covered}
+>
+	<canvas
+		bind:this={canvas}
+		style:width="{width}px"
+		style:height="{height}px"
+		class:grabbing={drag !== null}
+		tabindex="0"
+		aria-roledescription="3D scatter plot"
+		aria-label="3D map of the top {pts.length} games, placed by shared categories and mechanics. W A S D fly, Q and E move down and up, arrow keys look around, plus and minus zoom, space pauses the rotation. Use the search box in the panel to fly to a game."
+		onpointerdown={onDown}
+		onpointermove={onMove}
+		onpointerup={onUp}
+		onpointercancel={onUp}
+		onpointerleave={onLeave}
+		onkeydown={onCanvasKey}
+	></canvas>
+	{#if hover !== null && tip}
+		{@const d = pts[hover]}
+		<Tooltip x={tip.x} y={tip.y} {width}>
+			<span class="t">{d.g.name} <span class="muted">({d.g.year})</span></span>
+			<div class="row"><span>Rank</span><span class="v">#{d.g.rank}</span></div>
+			<div class="row"><span>Rating</span><span class="v">{fmt.r2(d.g.rating)}</span></div>
+			<div class="near">
+				Closest: {d.near
+					.slice(0, 3)
+					.map((j) => pts[j].g.name)
+					.join(', ')}
+			</div>
+		</Tooltip>
 	{/if}
-	<li class="ttl">· dot size = number of ratings</li>
-</ul>
 
-<div class="stage">
-	<div class="mapcol" bind:clientWidth={width}>
-		<figure class="wrap">
-			<canvas
-				bind:this={canvas}
-				style:width="{width}px"
-				style:height="{height}px"
-				class:grabbing={drag !== null}
-				tabindex="0"
-				aria-roledescription="3D scatter plot"
-				aria-label="Rotating 3D map of the top {pts.length} games, placed by shared categories and mechanics. Arrow keys rotate, plus and minus zoom, space pauses. Use the search box beside the map to fly to a game."
-				onpointerdown={onDown}
-				onpointermove={onMove}
-				onpointerup={onUp}
-				onpointerleave={onLeave}
-				onkeydown={onKey}
-			></canvas>
-			{#if hover !== null && tip}
-				{@const d = pts[hover]}
-				<Tooltip x={tip.x} y={tip.y} {width}>
-					<span class="t">{d.g.name} <span class="muted">({d.g.year})</span></span>
-					<div class="row"><span>Rank</span><span class="v">#{d.g.rank}</span></div>
-					<div class="row"><span>Rating</span><span class="v">{fmt.r2(d.g.rating)}</span></div>
-					<div class="near">
-						Closest: {d.near
-							.slice(0, 3)
-							.map((j) => pts[j].g.name)
-							.join(', ')}
-					</div>
-				</Tooltip>
+	<div class="hud hud-colour">
+		<div class="seg" role="group" aria-label="Colour points by">
+			<span class="lbl">Colour by</span>
+			<button class="chip" aria-pressed={mode === 'rating'} onclick={() => (mode = 'rating')}
+				>Rating</button
+			>
+			<button class="chip" aria-pressed={mode === 'year'} onclick={() => (mode = 'year')}
+				>Year</button
+			>
+			<button class="chip" aria-pressed={mode === 'trait'} onclick={() => (mode = 'trait')}
+				>A trait</button
+			>
+		</div>
+		{#if mode === 'trait'}
+			<label>
+				<span class="visually-hidden">Highlight a category or mechanic</span>
+				<select bind:value={ui.trait}>
+					<optgroup label="Mechanics">
+						{#each traits.filter((t) => t.kind === 'mechanic') as t (t.key)}
+							<option value={t.key}>{t.name}</option>
+						{/each}
+					</optgroup>
+					<optgroup label="Categories">
+						{#each traits.filter((t) => t.kind === 'category') as t (t.key)}
+							<option value={t.key}>{t.name}</option>
+						{/each}
+					</optgroup>
+				</select>
+			</label>
+		{/if}
+		<ul class="legend">
+			{#if mode === 'rating'}
+				<li class="scale">
+					<span>{RATING.lo.toFixed(1)}</span>
+					<span class="bar rating" aria-hidden="true"></span>
+					<span>{RATING.hi.toFixed(1)}+</span>
+				</li>
+				<li><span class="swatch dot" style:background="var(--series-2)"></span>8.0 and up</li>
+			{:else if mode === 'year'}
+				<li class="scale">
+					<span>{YEAR.lo}</span>
+					<span class="bar year" aria-hidden="true"></span>
+					<span>{YEAR.hi}</span>
+				</li>
+				<li>
+					<span class="swatch dot recent"></span>{YEAR.recent}
+				</li>
+				<li>
+					<span class="swatch dot newest"></span><strong>{YEAR.newest}+</strong> ({newestCount}
+					{newestCount === 1 ? 'game' : 'games'})
+				</li>
+			{:else}
+				<li>
+					<span class="swatch dot" style:background="var(--series-1)"></span>{traitName} ({traitCount})
+				</li>
+				<li><span class="swatch dot" style:background="var(--neutral-dot)"></span>Other games</li>
 			{/if}
-			<p class="foot">
-				Drag to rotate · hover a game to see its nearest neighbours · click one to fly to it. The
-				axes have no units: only closeness means something.
-			</p>
-		</figure>
+			<li class="ttl">Dot size = number of ratings</li>
+		</ul>
 	</div>
 
-	<aside class="panel" aria-labelledby="umap-panel-title">
-		<div class="search">
-			<label for="umap-search" id="umap-panel-title" class="panel-title">Fly to a game</label>
-			<input
-				id="umap-search"
-				type="search"
-				placeholder="Search the top {pts.length}…"
-				autocomplete="off"
-				role="combobox"
-				aria-expanded={qOpen && qResults.length > 0}
-				aria-controls="umap-search-list"
-				aria-autocomplete="list"
-				aria-activedescendant={qOpen && qResults.length
-					? `umap-opt-${pts[qResults[qActive]]?.g.id}`
-					: undefined}
-				bind:value={q}
-				oninput={() => {
-					qOpen = true;
-					qActive = 0;
-				}}
-				onfocus={() => (qOpen = true)}
-				onblur={() => setTimeout(() => (qOpen = false), 150)}
-				onkeydown={onSearchKey}
-			/>
-			{#if qOpen && qResults.length}
-				<ul id="umap-search-list" role="listbox" aria-label="Matching games">
-					{#each qResults as i, k (pts[i].g.id)}
-						<li
-							id="umap-opt-{pts[i].g.id}"
-							role="option"
-							aria-selected={k === qActive}
-							onmousedown={(e) => {
-								e.preventDefault();
-								choose(i);
-							}}
-							onmouseenter={() => (qActive = k)}
-						>
-							<span class="nm">{pts[i].g.name}</span>
-							<span class="meta">#{pts[i].g.rank} · {pts[i].g.year}</span>
+	<div class="hud hud-view">
+		<div class="view" role="group" aria-label="View controls">
+			<button class="chip" aria-pressed={playing} onclick={() => (playing = !playing)}>
+				{playing ? 'Pause' : 'Rotate'}
+			</button>
+			<button class="chip icon" aria-label="Zoom in" onclick={() => zoomBy(1.3)}>+</button>
+			<button class="chip icon" aria-label="Zoom out" onclick={() => zoomBy(1 / 1.3)}>−</button>
+			<button class="chip" onclick={reset}>Reset</button>
+		</div>
+		<p class="keys">
+			<kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> fly · <kbd>Q</kbd><kbd>E</kbd> down/up · drag
+			to look · scroll to zoom · <kbd>Shift</kbd> faster · <kbd>[</kbd><kbd>]</kbd> step through the ranking
+		</p>
+	</div>
+
+	<aside class="panel" class:touring={ui.tour} bind:this={panel} aria-label="Map panel">
+		{#if ui.tour}
+			<Tour onexit={exitTour} />
+		{:else}
+			{#if returnTo}
+				<button class="back" onclick={backToChapter}>← Back to {returnTo.label}</button>
+			{/if}
+			<div class="search">
+				<label for="umap-search" class="panel-title">Fly to a game</label>
+				<input
+					id="umap-search"
+					type="search"
+					placeholder="Search the top {pts.length}…"
+					autocomplete="off"
+					role="combobox"
+					aria-expanded={qOpen && qResults.length > 0}
+					aria-controls="umap-search-list"
+					aria-autocomplete="list"
+					aria-activedescendant={qOpen && qResults.length
+						? `umap-opt-${pts[qResults[qActive]]?.g.id}`
+						: undefined}
+					bind:value={q}
+					oninput={() => {
+						qOpen = true;
+						qActive = 0;
+					}}
+					onfocus={() => (qOpen = true)}
+					onblur={() => setTimeout(() => (qOpen = false), 150)}
+					onkeydown={onSearchKey}
+				/>
+				{#if qOpen && qResults.length}
+					<ul id="umap-search-list" role="listbox" aria-label="Matching games">
+						{#each qResults as i, k (pts[i].g.id)}
+							<li
+								id="umap-opt-{pts[i].g.id}"
+								role="option"
+								aria-selected={k === qActive}
+								onmousedown={(e) => {
+									e.preventDefault();
+									choose(i);
+								}}
+								onmouseenter={() => (qActive = k)}
+							>
+								<span class="nm">{pts[i].g.name}</span>
+								<span class="meta">#{pts[i].g.rank} · {pts[i].g.year}</span>
+							</li>
+						{/each}
+					</ul>
+				{:else if qOutside}
+					<p class="hint">
+						{qOutside.name} is #{qOutside.rank}, outside the top {pts.length} on this map.
+						<button class="inline" onclick={() => openGame(qOutside!.id)}>Open its details</button>
+					</p>
+				{/if}
+			</div>
+
+			{#if selectedGame && selected !== null}
+				<button class="backlist" onclick={backToList}>← Back to the top 100</button>
+				<div class="sel">
+					<h2 class="sel-name" tabindex="-1" bind:this={selHead}>{selectedGame.name}</h2>
+					<p class="sel-meta">
+						#{selectedGame.rank} · {selectedGame.year} · rated {fmt.r2(selectedGame.rating)}
+					</p>
+					<div class="sel-actions">
+						<button class="chip" onclick={() => openGame(selectedGame.id)}>Details</button>
+						<button class="chip" onclick={clearSelection}>Clear</button>
+					</div>
+					<div class="ranknav" role="group" aria-label="Step through the ranking">
+						{#if prevRanked !== null}
+							<button class="chip" onclick={() => stepRank(-1)} aria-keyshortcuts="["
+								>← #{pts[prevRanked].g.rank}<span class="visually-hidden">
+									{pts[prevRanked].g.name}, previous in the ranking</span
+								></button
+							>
+						{/if}
+						{#if nextRanked !== null}
+							<button class="chip" onclick={() => stepRank(1)} aria-keyshortcuts="]"
+								>#{pts[nextRanked].g.rank}<span class="visually-hidden">
+									{pts[nextRanked].g.name}, next in the ranking</span
+								> →</button
+							>
+						{/if}
+					</div>
+				</div>
+				<h3 class="panel-sub">Most similar games</h3>
+				<ol class="similar">
+					{#each similar as s (pts[s.i].g.id)}
+						{@const g = pts[s.i].g}
+						<li>
+							<button
+								class="sim"
+								onclick={() => select(s.i)}
+								onpointerenter={() => (listHover = s.i)}
+								onpointerleave={() => (listHover = null)}
+								onfocus={() => (listHover = s.i)}
+								onblur={() => (listHover = null)}
+							>
+								<span class="sim-top">
+									<span class="sim-name">{g.name}</span>
+									<span class="sim-pct">{pct(s.sim)}</span>
+								</span>
+								<span class="sim-bar"><span style:width={pct(s.sim)}></span></span>
+								<span class="sim-meta">
+									#{g.rank} · {fmt.r2(g.rating)} · shares {s.common.length}:
+									{s.common.slice(0, 3).map(nameOfTrait).join(', ')}{s.common.length > 3 ? '…' : ''}
+								</span>
+							</button>
 						</li>
 					{/each}
-				</ul>
-			{:else if qOutside}
-				<p class="hint">
-					{qOutside.name} is #{qOutside.rank}, outside the top {pts.length} on this map.
-					<button class="inline" onclick={() => openGame(qOutside!.id)}>Open its details</button>
+				</ol>
+				<p class="panel-note">
+					Similarity is the share of categories and mechanics two games have in common (Jaccard),
+					the same measure the map is built from. Pick one to fly to it.
 				</p>
-			{/if}
-		</div>
-
-		{#if selectedGame && selected !== null}
-			<div class="sel">
-				<p class="sel-name">{selectedGame.name}</p>
-				<p class="sel-meta">
-					#{selectedGame.rank} · {selectedGame.year} · rated {fmt.r2(selectedGame.rating)}
-				</p>
-				<div class="sel-actions">
-					<button class="chip" onclick={() => openGame(selectedGame.id)}>Details</button>
-					<button class="chip" onclick={clearSelection}>Clear</button>
+			{:else}
+				<div class="intro">
+					<p class="eyebrow">BoardGameGeek top {pts.length} · {snapshot}</p>
+					<p class="lede">
+						Every dot is a board game. Games that share categories and mechanics sit close together,
+						so the clumps are genres. Zoom in and the map tells you more.
+					</p>
+					<div class="ctas">
+						<button class="cta start" onclick={() => (ui.tour = true)}>Take the tour</button>
+						<button class="chip" onclick={() => openChapter('overview')}>Read the analysis</button>
+					</div>
 				</div>
-			</div>
-			<h3 class="panel-sub">Most similar games</h3>
-			<ol class="similar">
-				{#each similar as s (pts[s.i].g.id)}
-					{@const g = pts[s.i].g}
-					<li>
-						<button
-							class="sim"
-							onclick={() => select(s.i)}
-							onpointerenter={() => (listHover = s.i)}
-							onpointerleave={() => (listHover = null)}
-							onfocus={() => (listHover = s.i)}
-							onblur={() => (listHover = null)}
-						>
-							<span class="sim-top">
-								<span class="sim-name">{g.name}</span>
-								<span class="sim-pct">{pct(s.sim)}</span>
-							</span>
-							<span class="sim-bar"><span style:width={pct(s.sim)}></span></span>
-							<span class="sim-meta">
-								#{g.rank} · {fmt.r2(g.rating)} · shares {s.common.length}:
-								{s.common.slice(0, 3).map(nameOfTrait).join(', ')}{s.common.length > 3 ? '…' : ''}
-							</span>
-						</button>
-					</li>
-				{/each}
-			</ol>
-			<p class="panel-note">
-				Similarity is the share of categories and mechanics two games have in common (Jaccard), the
-				same measure the map is built from. Pick one to fly to it.
-			</p>
-		{:else}
-			<p class="empty">
-				Search above, or click any dot, to zoom in on a game and see the games most like it.
-			</p>
-			<div class="examples" role="group" aria-label="Examples">
-				{#each ['Gloomhaven', 'Wingspan', 'Brass: Birmingham', 'Codenames'] as name (name)}
-					{@const i = pts.findIndex((d) => d.g.name === name)}
-					{#if i >= 0}
-						<button class="chip" onclick={() => select(i)}>{name}</button>
-					{/if}
-				{/each}
-			</div>
+				<h2 class="panel-sub" id="top100-h">Top 100</h2>
+				<ol class="top100" aria-labelledby="top100-h">
+					{#each byRank.slice(0, 100) as i (pts[i].g.id)}
+						{@const g = pts[i].g}
+						<li>
+							<button
+								data-id={g.id}
+								onclick={() => select(i)}
+								onpointerenter={() => (ui.hoverGame = g.id)}
+								onpointerleave={() => (ui.hoverGame = null)}
+								><span class="rk">{g.rank}</span><span class="nm">{g.name}</span><span class="rt"
+									>{fmt.r2(g.rating)}</span
+								></button
+							>
+						</li>
+					{/each}
+				</ol>
+				<h2 class="panel-sub">Regions</h2>
+				<div class="examples" role="group" aria-label="Fly to a region">
+					{#each regions.slice(0, 8) as r (r.id)}
+						<button class="chip" onclick={() => flyToRegion(r.id)}>{r.traits[0]}</button>
+					{/each}
+				</div>
+				<h2 class="panel-sub">Chapters</h2>
+				<ol class="toc">
+					{#each chapters as c, i (c.id)}
+						<li>
+							<a
+								href={chapterHref(c.id)}
+								onclick={(e) => {
+									e.preventDefault();
+									openChapter(c.id, e.currentTarget);
+								}}><span class="n">{String(i + 1).padStart(2, '0')}</span>{c.label}</a
+							>
+						</li>
+					{/each}
+				</ol>
+			{/if}
+			<details class="table-view">
+				<summary>Table view: each game’s nearest neighbours</summary>
+				<div class="scroll">
+					<table>
+						<thead><tr><th>Rank</th><th>Game</th><th>Closest on the map</th></tr></thead>
+						<tbody>
+							{#each pts as d (d.g.id)}
+								<tr>
+									<td>{d.g.rank}</td>
+									<td>{d.g.name}</td>
+									<td
+										>{d.near
+											.slice(0, 3)
+											.map((j) => pts[j].g.name)
+											.join(', ')}</td
+									>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+				</div>
+			</details>
 		{/if}
 		<div class="visually-hidden" role="status" aria-live="polite">{announce}</div>
 	</aside>
-</div>
-
-<details class="table-view">
-	<summary>Table view: each game's nearest neighbours</summary>
-	<div class="scroll">
-		<table>
-			<thead><tr><th>Rank</th><th>Game</th><th>Closest on the map</th></tr></thead>
-			<tbody>
-				{#each tableRows as d (d.g.id)}
-					<tr>
-						<td>{d.g.rank}</td>
-						<td>{d.g.name}</td>
-						<td
-							>{d.near
-								.slice(0, 3)
-								.map((j) => pts[j].g.name)
-								.join(', ')}</td
-						>
-					</tr>
-				{/each}
-			</tbody>
-		</table>
-	</div>
-</details>
+</section>
 
 <style>
-	.controls {
+	.space {
+		position: fixed;
+		inset: 0;
+		overflow: hidden;
+		background: var(--page);
+	}
+	canvas {
+		position: absolute;
+		inset: 0;
+		display: block;
+		cursor: grab;
+		touch-action: none;
+	}
+	canvas.grabbing {
+		cursor: grabbing;
+	}
+	canvas:focus-visible {
+		outline-offset: -4px;
+	}
+	.hud {
+		position: absolute;
+		background: color-mix(in srgb, var(--surface-1) 92%, transparent);
+		border: 1px solid var(--border);
+		border-radius: 12px;
+		padding: 0.5rem 0.65rem;
+		font-size: 0.82rem;
+		box-shadow: var(--shadow);
+	}
+	.hud-colour {
+		top: calc(56px + 0.75rem);
+		right: 0.75rem;
+		max-width: min(560px, calc(100vw - 344px - 2rem));
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		gap: 0.5rem 1rem;
-		margin-bottom: 0.75rem;
+		gap: 0.4rem 0.75rem;
+	}
+	.hud-view {
+		right: 0.75rem;
+		bottom: 0.75rem;
+		display: grid;
+		gap: 0.35rem;
+		justify-items: end;
 	}
 	.seg,
 	.view {
@@ -776,13 +1258,70 @@
 		align-items: center;
 		gap: 0.35rem;
 	}
-	.view {
-		margin-left: auto;
-	}
 	.lbl,
 	.ttl {
 		color: var(--text-muted);
-		font-size: 0.82rem;
+		font-size: 0.8rem;
+	}
+	.legend {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.2rem 0.7rem;
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		color: var(--text-secondary);
+		font-size: 0.78rem;
+	}
+	.legend li {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.3rem;
+	}
+	.scale {
+		gap: 0.35rem;
+	}
+	.bar {
+		display: inline-block;
+		width: 96px;
+		height: 8px;
+		border-radius: 4px;
+	}
+	/* Same stops as the canvas: RATING.lo 6.9 → 7.99 cool, 8.0 → 8.7 warm (8.0 sits at 61%). */
+	.bar.rating {
+		background: linear-gradient(
+			90deg,
+			var(--ord-1) 0%,
+			var(--ord-4) 60.5%,
+			var(--series-2) 61%,
+			var(--div-neg) 100%
+		);
+	}
+	.bar.year {
+		background: linear-gradient(90deg, var(--ord-1), var(--ord-5));
+	}
+	.swatch.recent {
+		background: color-mix(in lab, var(--series-2) 55%, var(--surface-1));
+	}
+	.swatch.newest {
+		background: var(--series-2);
+		box-shadow: 0 0 0 1.5px var(--text-primary);
+	}
+	.keys {
+		margin: 0;
+		color: var(--text-muted);
+		font-size: 0.75rem;
+	}
+	.keys kbd {
+		font: inherit;
+		font-size: 0.7rem;
+		border: 1px solid var(--border);
+		border-bottom-width: 2px;
+		border-radius: 4px;
+		padding: 0 0.25rem;
+		margin-right: 1px;
+		color: var(--text-secondary);
+		background: var(--surface-1);
 	}
 	.icon {
 		width: 2rem;
@@ -790,30 +1329,123 @@
 		text-align: center;
 	}
 	select {
-		max-width: 100%;
+		max-width: 220px;
 		border: 1px solid var(--border);
 		background: var(--surface-1);
 		border-radius: 8px;
 		padding: 0.3rem 0.5rem;
 		font-size: 0.85rem;
 	}
-	.stage {
-		display: grid;
-		grid-template-columns: minmax(0, 1fr) 300px;
-		gap: 1rem;
-		align-items: start;
-	}
-	@media (max-width: 860px) {
-		.stage {
-			grid-template-columns: minmax(0, 1fr);
-		}
-	}
 	.panel {
-		background: var(--surface-1);
+		position: absolute;
+		top: calc(56px + 0.75rem);
+		left: 0.75rem;
+		bottom: 0.75rem;
+		width: 320px;
+		overflow-y: auto;
+		background: color-mix(in srgb, var(--surface-1) 95%, transparent);
 		border: 1px solid var(--border);
-		border-radius: 12px;
+		border-radius: 14px;
 		padding: 0.9rem;
 		font-size: 0.88rem;
+		box-shadow: var(--shadow);
+	}
+	.panel.touring {
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+		padding: 0;
+	}
+	@media (max-width: 859px) {
+		.panel {
+			top: auto;
+			left: 0;
+			right: 0;
+			bottom: 0;
+			width: auto;
+			height: 44dvh;
+			border-radius: 16px 16px 0 0;
+			border-bottom: 0;
+		}
+		.hud-colour {
+			top: calc(56px + 0.4rem);
+			left: 0.5rem;
+			right: 0.5rem;
+			max-width: none;
+			padding: 0.35rem 0.5rem;
+		}
+		.hud-colour .legend {
+			display: none;
+		}
+		.hud-view {
+			right: 0.5rem;
+			bottom: calc(44dvh + 0.5rem);
+			padding: 0.3rem;
+		}
+		.keys {
+			display: none;
+		}
+	}
+	.back {
+		display: block;
+		width: 100%;
+		margin-bottom: 0.75rem;
+		padding: 0.5rem 0.7rem;
+		border-radius: 10px;
+		border: 1px solid var(--series-1);
+		background: var(--surface-2);
+		color: var(--text-primary);
+		font-weight: 600;
+		text-align: left;
+		cursor: pointer;
+	}
+	.intro {
+		margin: 0.9rem 0 0.4rem;
+	}
+	.intro .eyebrow {
+		margin-bottom: 0.3rem;
+	}
+	.lede {
+		color: var(--text-secondary);
+		margin: 0 0 0.75rem;
+		line-height: 1.45;
+	}
+	.ctas {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		align-items: center;
+	}
+	.cta {
+		border: 0;
+		border-radius: 999px;
+		padding: 0.4rem 0.95rem;
+		font-weight: 600;
+		font-size: 0.88rem;
+		background: var(--text-primary);
+		color: var(--surface-1);
+		cursor: pointer;
+	}
+	.toc {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: grid;
+	}
+	.toc a {
+		display: flex;
+		gap: 0.6rem;
+		padding: 0.3rem 0.4rem;
+		border-radius: 6px;
+		color: var(--text-primary);
+		text-decoration: none;
+	}
+	.toc a:hover {
+		background: var(--surface-2);
+	}
+	.toc .n {
+		color: var(--text-muted);
+		font-variant-numeric: tabular-nums;
 	}
 	.panel-title {
 		display: block;
@@ -864,7 +1496,6 @@
 	.sim-meta,
 	.sel-meta,
 	.panel-note,
-	.empty,
 	.hint {
 		color: var(--text-muted);
 		font-size: 0.8rem;
@@ -892,6 +1523,7 @@
 		color: var(--text-primary);
 		margin: 0;
 		line-height: 1.25;
+		letter-spacing: normal;
 	}
 	.sel-meta {
 		margin: 0.15rem 0 0.5rem;
@@ -906,14 +1538,12 @@
 		letter-spacing: 0.08em;
 		text-transform: uppercase;
 		color: var(--text-muted);
-		margin: 0 0 0.3rem;
+		margin: 1rem 0 0.4rem;
 	}
 	.similar {
 		list-style: none;
 		margin: 0;
 		padding: 0;
-		max-height: 520px;
-		overflow-y: auto;
 	}
 	.sim {
 		display: grid;
@@ -955,41 +1585,96 @@
 		background: var(--series-1);
 		border-radius: 2px;
 	}
-	.empty {
-		margin: 0.9rem 0 0.5rem;
+	.backlist {
+		display: block;
+		margin: 0.75rem 0 0;
+		padding: 0.25rem 0;
+		border: 0;
+		background: none;
+		color: var(--link);
+		font-size: 0.85rem;
+		font-weight: 600;
+		cursor: pointer;
+	}
+	.backlist:hover {
+		text-decoration: underline;
+	}
+	.ranknav {
+		display: flex;
+		justify-content: space-between;
+		gap: 0.35rem;
+		margin-top: 0.5rem;
+	}
+	.ranknav .chip:only-child:last-child {
+		margin-left: auto;
+	}
+	.top100 {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		max-height: 260px;
+		overflow-y: auto;
+		border: 1px solid var(--border);
+		border-radius: 10px;
+	}
+	.top100 button {
+		display: grid;
+		grid-template-columns: 2.1rem minmax(0, 1fr) auto;
+		gap: 0.4rem;
+		width: 100%;
+		padding: 0.3rem 0.55rem;
+		border: 0;
+		background: none;
+		text-align: left;
+		cursor: pointer;
+		color: var(--text-primary);
+		font-size: 0.84rem;
+	}
+	.top100 button:hover,
+	.top100 button:focus-visible {
+		background: var(--surface-2);
+	}
+	.top100 .rk,
+	.top100 .rt {
+		color: var(--text-muted);
+		font-variant-numeric: tabular-nums;
+	}
+	.top100 .nm {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
 	}
 	.examples {
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.35rem;
 	}
-	.wrap {
-		position: relative;
-		margin: 0;
-		background: var(--surface-1);
-		border: 1px solid var(--border);
-		border-radius: 12px;
-	}
-	canvas {
-		display: block;
-		cursor: grab;
-		touch-action: pan-y;
-	}
-	canvas.grabbing {
-		cursor: grabbing;
-	}
-	canvas:focus-visible {
-		outline-offset: -2px;
-	}
 	.near {
 		margin-top: 0.25rem;
 		color: var(--text-muted);
 	}
-	.foot {
+	.table-view {
+		margin-top: 1.25rem;
 		font-size: 0.8rem;
-		color: var(--text-muted);
-		margin: 0;
-		padding: 0.5rem 0.75rem 0.6rem;
-		border-top: 1px solid var(--border);
+	}
+	.table-view summary {
+		cursor: pointer;
+		color: var(--text-secondary);
+	}
+	.table-view .scroll {
+		max-height: 320px;
+		overflow: auto;
+		margin-top: 0.5rem;
+	}
+	.table-view table {
+		border-collapse: collapse;
+		width: 100%;
+	}
+	.table-view th,
+	.table-view td {
+		text-align: left;
+		padding: 0.25rem 0.35rem;
+		border-bottom: 1px solid var(--grid);
+		vertical-align: top;
 	}
 </style>

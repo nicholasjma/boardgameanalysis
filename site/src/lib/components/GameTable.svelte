@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { data, fmt, type Game } from '#lib/data.ts';
-	import { openGame } from '#lib/state.svelte.ts';
+	import { flyTo, openGame } from '#lib/state.svelte.ts';
 
 	type Key = 'rank' | 'name' | 'year' | 'rating' | 'pred' | 'magic' | 'votes' | 'weight';
 	type Col = { key: Key; label: string; num?: boolean; fmt?: (v: number) => string };
@@ -78,7 +78,14 @@
 							{@const v = g[c.key]}
 							<td class:num={c.num}>
 								{#if c.key === 'name'}
-									<button class="link" onclick={() => openGame(g.id)}>{g.name}</button>
+									<span class="name">
+										<button class="link" onclick={() => openGame(g.id)}>{g.name}</button>
+										{#if g.umap}
+											<button class="fly" onclick={() => flyTo(g.id)}
+												><span class="visually-hidden">Show {g.name} on the </span>3D map</button
+											>
+										{/if}
+									</span>
 								{:else if v === null || v === undefined}
 									—
 								{:else if c.fmt}
@@ -153,6 +160,27 @@
 		cursor: pointer;
 		text-align: left;
 		white-space: normal;
+	}
+	.name {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.fly {
+		flex: none;
+		border: 1px solid var(--border);
+		background: var(--surface-1);
+		color: var(--text-secondary);
+		border-radius: 999px;
+		padding: 0.05rem 0.5rem;
+		font-size: 0.72rem;
+		font-weight: 600;
+		cursor: pointer;
+		min-height: 24px;
+	}
+	.fly:hover {
+		color: var(--text-primary);
+		border-color: var(--series-1);
 	}
 	.link:hover {
 		text-decoration: underline;

@@ -5,19 +5,31 @@
 	import { cubicOut } from 'svelte/easing';
 	import { data, fmt, kindLabel } from '#lib/data.ts';
 	import { portal } from '#lib/portal.ts';
-	import { goToSection, openGame, setGameOpener, toggleTheme, ui } from '#lib/state.svelte.ts';
+	import { chapters } from '#lib/chapters.ts';
+	import {
+		closeChapter,
+		flyTo,
+		openChapter,
+		openGame,
+		setGameOpener,
+		toggleTheme,
+		ui
+	} from '#lib/state.svelte.ts';
 
-	let { sections }: { sections: readonly (readonly [string, string])[] } = $props();
-
-	type Item = {
+	/**
+	 * Where focus goes after an action: into the game drawer (and back to the opener when it
+	 * closes), somewhere new that takes focus itself (a chapter, the map), or back to the opener.
+	 */
+	type Focus = 'drawer' | 'moves' | 'restore';
+	type Action = { run: () => void; focus: Focus };
+	type Item = Action & {
 		id: string;
-		group: 'Games' | 'Sections' | 'Traits' | 'Actions';
+		group: 'Games' | 'Chapters' | 'Traits' | 'Actions';
 		label: string;
 		hint?: string;
 		keywords?: string;
-		run: () => void;
-		/** Secondary action (Shift+Enter, or the row's pill): show the game on the 3D map. */
-		onMap?: () => void;
+		/** Secondary action: Shift+Enter, or the pill on the row. */
+		alt?: Action & { label: string };
 	};
 
 	let query = $state('');
@@ -29,28 +41,39 @@
 		typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 	);
 
-	const sectionItems: Item[] = $derived([
+	const top1000 = data.games.filter((g) => g.umap);
+	const mostMagic = [...top1000].sort((a, b) => b.magic - a.magic)[0];
+
+	const chapterItems: Item[] = [
 		{
-			id: 's-top',
-			group: 'Sections',
-			label: 'Top of page',
-			keywords: 'home start hero',
-			run: () => goToSection('top')
+			id: 'home',
+			group: 'Chapters',
+			label: 'The 3D map',
+			keywords: 'home start top space explore',
+			focus: 'moves',
+			run: closeChapter
 		},
-		...sections.map(([id, label]) => ({
-			id: `s-${id}`,
-			group: 'Sections' as const,
-			label,
-			run: () => goToSection(id)
-		})),
 		{
-			id: 's-methods',
-			group: 'Sections',
-			label: 'Methods & data',
-			keywords: 'about source license',
-			run: () => goToSection('methods')
-		}
-	]);
+			id: 'tour',
+			group: 'Chapters',
+			label: 'Take the guided tour',
+			keywords: 'story walkthrough intro start',
+			focus: 'moves',
+			run: () => {
+				closeChapter();
+				ui.tour = true;
+			}
+		},
+		...chapters.map((c, i) => ({
+			id: `c-${c.id}`,
+			group: 'Chapters' as const,
+			label: c.label,
+			hint: String(i + 1).padStart(2, '0'),
+			keywords: c.title.toLowerCase(),
+			focus: 'moves' as const,
+			run: () => openChapter(c.id)
+		}))
+	];
 
 	const actionItems: Item[] = $derived([
 		{
@@ -58,55 +81,71 @@
 			group: 'Actions',
 			label: `Switch to ${ui.theme === 'dark' ? 'light' : 'dark'} theme`,
 			keywords: 'dark light mode colour color appearance',
+			focus: 'restore',
 			run: toggleTheme
 		},
 		{
 			id: 'a-random',
 			group: 'Actions',
-			label: 'Open a random top-500 game',
+			label: 'Fly to a random game',
 			keywords: 'surprise shuffle lucky',
-			run: () => openGame(data.games[Math.floor(Math.random() * 500)].id)
+			focus: 'moves',
+			run: () => flyTo(top1000[Math.floor(Math.random() * top1000.length)].id)
 		},
 		{
 			id: 'a-magic',
 			group: 'Actions',
-			label: 'Open the game with the most magic sauce',
+			label: 'Fly to the game with the most magic sauce',
 			keywords: 'overperformer best surprising',
-			run: () => openGame([...data.games].sort((a, b) => b.magic - a.magic)[0].id)
+			focus: 'moves',
+			run: () => flyTo(mostMagic.id)
 		},
 		{
 			id: 'a-source',
 			group: 'Actions',
 			label: 'View the source on GitHub',
 			keywords: 'code repository',
+			focus: 'restore',
 			run: () =>
 				window.open('https://github.com/nicholasjma/boardgameanalysis', '_blank', 'noopener')
 		}
 	]);
 
+	// Games on the map fly there (details one keystroke away); the rest open their details.
 	const gameItems: Item[] = data.games.map((g) => ({
 		id: `g-${g.id}`,
 		group: 'Games',
 		label: g.name,
 		hint: `#${g.rank} · ${g.year} · ${fmt.r2(g.rating)}`,
-		run: () => openGame(g.id),
-		onMap: g.umap
-			? () => {
-					ui.mapGame = g.id;
-					goToSection('space');
+		...(g.umap
+			? {
+					focus: 'moves' as const,
+					run: () => flyTo(g.id),
+					alt: { label: 'Details', focus: 'drawer' as const, run: () => openGame(g.id) }
 				}
-			: undefined
+			: { focus: 'drawer' as const, run: () => openGame(g.id) })
 	}));
 
+	// A trait lights up its games on the map; the explorer has the numbers.
 	const traitItems: Item[] = data.traits.map((t) => ({
 		id: `t-${t.key}`,
 		group: 'Traits',
-		label: `Explore ${t.name}`,
+		label: t.name,
 		hint: `${kindLabel[t.kind]} · ${t.count} games`,
-		keywords: t.kind,
+		keywords: `${t.kind} trait`,
+		focus: 'moves',
 		run: () => {
-			ui.trait = t.key;
-			goToSection('traits');
+			closeChapter();
+			ui.tour = false;
+			ui.scene = { mode: 'trait', trait: t.key, aimTrait: true, game: null, zoom: 2.2 };
+		},
+		alt: {
+			label: 'Explorer',
+			focus: 'moves',
+			run: () => {
+				ui.trait = t.key;
+				openChapter('traits');
+			}
 		}
 	}));
 
@@ -123,7 +162,7 @@
 
 	const results = $derived.by((): Item[] => {
 		const q = query.trim().toLowerCase();
-		if (!q) return [...sectionItems, ...actionItems];
+		if (!q) return [...chapterItems, ...actionItems];
 		const pick = (items: Item[], n: number) =>
 			items
 				.map((it, i) => ({ it, s: score(it, q), i }))
@@ -133,14 +172,14 @@
 				.map((x) => x.it);
 		return [
 			...pick(gameItems, 7),
-			...pick(sectionItems, 4),
+			...pick(chapterItems, 4),
 			...pick(traitItems, 4),
 			...pick(actionItems, 4)
 		];
 	});
 
 	const groups = $derived(
-		(['Games', 'Sections', 'Traits', 'Actions'] as const)
+		(['Games', 'Chapters', 'Traits', 'Actions'] as const)
 			.map((g) => ({ name: g, items: results.filter((r) => r.group === g) }))
 			.filter((g) => g.items.length)
 	);
@@ -166,23 +205,22 @@
 		if (restore) (opener ?? trigger)?.focus({ preventScroll: true });
 	}
 
-	function run(item: Item) {
-		// A game drawer replaces the palette; when it closes, focus goes back to the opener.
-		if (item.group === 'Games' || item.id === 'a-random' || item.id === 'a-magic') {
+	function run(item: Item, secondary = false) {
+		const action = secondary && item.alt ? item.alt : item;
+		if (action.focus === 'drawer') {
+			// The drawer replaces the palette; when it closes, focus goes back to the opener.
 			setGameOpener(opener ?? trigger ?? null);
 			close(false);
-		} else if (item.group === 'Sections' || item.group === 'Traits') {
-			close(false); // focus moves to the section heading
-		} else {
-			close();
-		}
-		item.run();
+		} else close(action.focus === 'restore');
+		action.run();
 	}
 
-	function showOnMap(item: Item) {
-		close(false); // focus moves to the map section's heading
-		item.onMap?.();
-	}
+	const enterLabel = (item: Item | undefined) =>
+		item?.group === 'Games' && item.alt
+			? 'fly to it'
+			: item?.group === 'Traits'
+				? 'show on map'
+				: 'open';
 
 	function onWindowKey(e: KeyboardEvent) {
 		const typing =
@@ -214,8 +252,7 @@
 			active = n - 1;
 		} else if (e.key === 'Enter' && flat[active]) {
 			e.preventDefault();
-			if (e.shiftKey && flat[active].onMap) showOnMap(flat[active]);
-			else run(flat[active]);
+			run(flat[active], e.shiftKey);
 		} else if (e.key === 'Escape') {
 			e.preventDefault();
 			e.stopPropagation();
@@ -278,13 +315,13 @@
 					onkeydown={onKey}
 					type="text"
 					role="combobox"
-					aria-label="Search games, sections, traits and actions"
+					aria-label="Search games, chapters, traits and actions"
 					aria-expanded="true"
 					aria-controls="cmd-list"
 					aria-autocomplete="list"
 					aria-activedescendant={flat[active] ? `cmd-${flat[active].id}` : undefined}
 					aria-describedby="cmd-help"
-					placeholder="Search games, sections, traits…"
+					placeholder="Search games, chapters, traits…"
 					autocomplete="off"
 					spellcheck="false"
 				/>
@@ -311,16 +348,15 @@
 								<span class="label">{item.label}</span>
 								<span class="right">
 									{#if item.hint}<span class="hint">{item.hint}</span>{/if}
-									{#if item.onMap}
+									{#if item.alt}
 										<!-- Pointer shortcut; keyboard users get Shift+Enter (see #cmd-help). -->
 										<span
 											class="map"
 											aria-hidden="true"
-											title="Show {item.label} and similar games on the 3D map"
 											onclick={(e) => {
 												e.stopPropagation();
-												showOnMap(item);
-											}}>3D map</span
+												run(item, true);
+											}}>{item.alt.label}</span
 										>
 									{/if}
 								</span>
@@ -333,13 +369,15 @@
 			</div>
 			<div class="foot" aria-hidden="true">
 				<span><kbd>↑</kbd><kbd>↓</kbd> move</span>
-				<span><kbd>↵</kbd> open</span>
-				{#if flat[active]?.onMap}<span><kbd>⇧</kbd><kbd>↵</kbd> show on 3D map</span>{/if}
+				<span><kbd>↵</kbd> {enterLabel(flat[active])}</span>
+				{#if flat[active]?.alt}<span
+						><kbd>⇧</kbd><kbd>↵</kbd> {flat[active].alt?.label.toLowerCase()}</span
+					>{/if}
 				<span><kbd>Esc</kbd> close</span>
 			</div>
 			<p id="cmd-help" class="visually-hidden">
-				Enter opens the result. For a game in the top 1,000, Shift+Enter shows it and similar games
-				on the 3D map.
+				Enter flies the 3D map to a game or lights up a trait on it. Shift+Enter opens a game’s
+				details, or the trait explorer.
 			</p>
 			<div class="visually-hidden" role="status" aria-live="polite">{status}</div>
 		</div>
