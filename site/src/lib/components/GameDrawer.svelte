@@ -3,7 +3,7 @@
 	import { cubicOut } from 'svelte/easing';
 	import { prefersReducedMotion } from 'svelte/motion';
 	import { bggUrl, data, fmt, gamesById } from '#lib/data.ts';
-	import { closeGame, goToSection, ui } from '#lib/state.svelte.ts';
+	import { closeGame, flyTo, openChapter, ui } from '#lib/state.svelte.ts';
 	import Waterfall from '#lib/charts/Waterfall.svelte';
 
 	const game = $derived(ui.game === null ? null : (gamesById.get(ui.game) ?? null));
@@ -17,7 +17,10 @@
 	});
 
 	function onKey(e: KeyboardEvent) {
-		if (e.key === 'Escape' && ui.game !== null && !ui.palette) closeGame();
+		if (e.key === 'Escape' && ui.game !== null && !ui.palette) {
+			e.preventDefault(); // a chapter pane underneath stays open
+			closeGame();
+		}
 	}
 
 	/** Modal: keep Tab and Shift+Tab cycling inside the drawer. */
@@ -38,18 +41,10 @@
 		}
 	}
 
-	function showOnMap(id: number) {
-		closeGame();
-		setTimeout(() => {
-			ui.mapGame = id;
-			goToSection('space');
-		});
-	}
-
 	function pickTrait(key: string) {
 		ui.trait = key;
 		closeGame();
-		setTimeout(() => goToSection('traits'));
+		setTimeout(() => openChapter('traits'));
 	}
 
 	const dur = (ms: number) => (prefersReducedMotion.current ? 0 : ms);
@@ -82,6 +77,11 @@
 			</div>
 			<button class="close" onclick={closeGame} aria-label="Close details">×</button>
 		</div>
+		{#if game.umap}
+			<button class="fly" onclick={() => flyTo(game.id)}>
+				<span aria-hidden="true">◎</span> Show similar games on the 3D map
+			</button>
+		{/if}
 
 		<div class="kpis">
 			<div><span class="k">Actual</span><span class="n">{fmt.r2(game.rating)}</span></div>
@@ -168,11 +168,6 @@
 		</section>
 
 		<div class="outs">
-			{#if game.umap}
-				<button class="chip" onclick={() => showOnMap(game.id)}
-					>Show similar games on the 3D map</button
-				>
-			{/if}
 			<a class="out" href={bggUrl(game.id)} target="_blank" rel="noopener"
 				>View on BoardGameGeek ↗</a
 			>
@@ -316,6 +311,24 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.35rem;
+	}
+	.fly {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		width: 100%;
+		margin: 0 0 1rem;
+		padding: 0.55rem 0.8rem;
+		border: 0;
+		border-radius: 10px;
+		background: var(--text-primary);
+		color: var(--surface-1);
+		font-weight: 600;
+		font-size: 0.9rem;
+		cursor: pointer;
+	}
+	.fly:hover {
+		opacity: 0.9;
 	}
 	.outs {
 		display: flex;
