@@ -231,3 +231,21 @@ test('the top 100 can be walked on the map', async ({ page }) => {
 	await page.keyboard.press('[');
 	await expect(name).toHaveText(first);
 });
+
+test('every game family opens without errors (trait names can repeat)', async ({ page }) => {
+	// Regression: "Deduction" is both a category and a mechanic, and a list keyed by name threw.
+	const errors: string[] = [];
+	page.on('pageerror', (e) => errors.push(e.message));
+	await page.goto('/#map');
+	const families = page.getByRole('listbox', { name: 'Game families' }).getByRole('option');
+	await expect(families.first()).toBeVisible();
+	for (let i = 0; i < (await families.count()); i++) {
+		await families.nth(i).click();
+		await expect(page.getByText(/^What defines/)).toBeVisible();
+	}
+	// The family with both Deductions labels which is which.
+	const deduction = families.filter({ hasText: /Deduction/ }).first();
+	if ((await deduction.getAttribute('aria-selected')) !== 'true') await deduction.click();
+	await expect(page.getByText('(mechanic)').first()).toBeVisible();
+	expect(errors).toEqual([]);
+});

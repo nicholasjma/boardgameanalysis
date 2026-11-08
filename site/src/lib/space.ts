@@ -153,8 +153,10 @@ export const regions: Region[] = (() => {
 			})
 			.filter((x) => x.score > 0)
 			.sort((a, b) => b.score - a.score)
-			.slice(0, 2)
-			.map((x) => data.traits[x.t]?.name ?? '');
+			.map((x) => data.traits[x.t]?.name ?? '')
+			// A category and a mechanic can share a name (Deduction); say it once.
+			.filter((name, k, all) => name && all.indexOf(name) === k)
+			.slice(0, 2);
 		if (!named.length) continue;
 		const id = out.length;
 		for (let i = 0; i < N; i++) if (lab[i] === c) pts[i].region = id;

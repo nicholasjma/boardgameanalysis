@@ -51,7 +51,8 @@ export interface Cluster {
 	meanRating: number;
 	meanMagic: number;
 	topGames: number[];
-	traits: { name: string; share: number }[];
+	/** `key` is missing from data exported before it was added. */
+	traits: { key?: string; name: string; share: number }[];
 }
 
 export interface Shift {

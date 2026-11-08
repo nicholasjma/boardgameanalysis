@@ -142,9 +142,14 @@
 	<div class="detail">
 		<div>
 			<p class="chart-title">What defines “{shortName(c.name)}”</p>
-			{#each c.traits as t (t.name)}
+			<!-- Names can repeat (Deduction is both a category and a mechanic): key by trait key. -->
+			{#each c.traits as t, i (t.key ?? i)}
 				<div class="trait">
-					<span class="tn">{t.name}</span>
+					<span class="tn"
+						>{t.name}{#if t.key && c.traits.filter((u) => u.name === t.name).length > 1}
+							<span class="kind">({t.key.startsWith('mech:') ? 'mechanic' : 'category'})</span
+							>{/if}</span
+					>
 					<span class="track"><span class="fill" style:width="{t.share * 100}%"></span></span>
 					<span class="tv">{fmt.pct(t.share)}</span>
 				</div>
@@ -328,5 +333,8 @@
 	}
 	.tops button:hover {
 		text-decoration: underline;
+	}
+	.kind {
+		color: var(--text-muted);
 	}
 </style>
