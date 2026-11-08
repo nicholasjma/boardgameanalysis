@@ -88,3 +88,55 @@ test('every focusable control shows a visible focus indicator', async ({ page })
 	});
 	expect(missing).toEqual([]);
 });
+
+test('3D map: search flies to a game and lists similar games', async ({ page }) => {
+	const search = page.getByRole('combobox', { name: 'Fly to a game' });
+	await search.fill('Gloomhaven');
+	await expect(page.getByRole('option', { name: /^Gloomhaven #/ })).toHaveAttribute(
+		'aria-selected',
+		'true'
+	);
+	await search.press('Enter');
+	const panel = page.getByRole('complementary', { name: 'Fly to a game' });
+	await expect(panel.locator('.sel-name')).toHaveText('Gloomhaven');
+	const similar = panel.getByRole('list').getByRole('button');
+	await expect(similar).toHaveCount(10);
+	await expect(page.getByRole('status').filter({ hasText: 'most similar' })).toHaveText(
+		/Gloomhaven and its 10 most similar games/
+	);
+
+	// Hopping to a neighbour re-centres the panel on it.
+	const next = (await similar.first().locator('.sim-name').textContent())!;
+	await similar.first().click();
+	await expect(panel.locator('.sel-name')).toHaveText(next);
+	await panel.getByRole('button', { name: 'Clear' }).click();
+	await expect(panel.locator('.sel-name')).toHaveCount(0);
+});
+
+test('the game drawer links to the game on the 3D map', async ({ page }) => {
+	await page.getByRole('button', { name: /search and commands/i }).click();
+	await page.keyboard.type('Wingspan');
+	await page.keyboard.press('Enter');
+	await page.getByRole('button', { name: 'Show similar games on the 3D map' }).click();
+	await expect(page.locator('#space .sel-name')).toHaveText('Wingspan');
+	await expect(page.locator('#space h2')).toBeFocused();
+});
+
+test('palette: Shift+Enter on a game flies to it on the 3D map', async ({ page }) => {
+	await page.getByRole('button', { name: /search and commands/i }).click();
+	await page.keyboard.type('Terraforming Mars');
+	await page.keyboard.press('Shift+Enter');
+	await expect(page.getByRole('dialog', { name: 'Command menu' })).toBeHidden();
+	await expect(page.locator('#space .sel-name')).toHaveText('Terraforming Mars');
+	await expect(page.locator('#space h2')).toBeFocused();
+});
+
+test('palette: the 3D map pill on a game result flies to it', async ({ page, isMobile }) => {
+	test.skip(isMobile, 'hover-revealed pill; touch shows it always but Playwright taps differ');
+	await page.getByRole('button', { name: /search and commands/i }).click();
+	await page.keyboard.type('Ark Nova');
+	const row = page.getByRole('option', { name: /^Ark Nova/ });
+	await row.hover();
+	await row.locator('.map').click();
+	await expect(page.locator('#space .sel-name')).toHaveText('Ark Nova');
+});

@@ -8,6 +8,8 @@ export const ui = $state({
 	trait: 'mech:Cooperative Game' as string,
 	hoverGame: null as number | null,
 	palette: false,
+	/** A game another component asked the 3D map to fly to; the map consumes and clears it. */
+	mapGame: null as number | null,
 	theme: 'light' as Theme
 });
 

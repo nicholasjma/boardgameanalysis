@@ -16,6 +16,8 @@
 		hint?: string;
 		keywords?: string;
 		run: () => void;
+		/** Secondary action (Shift+Enter, or the row's pill): show the game on the 3D map. */
+		onMap?: () => void;
 	};
 
 	let query = $state('');
@@ -87,7 +89,13 @@
 		group: 'Games',
 		label: g.name,
 		hint: `#${g.rank} · ${g.year} · ${fmt.r2(g.rating)}`,
-		run: () => openGame(g.id)
+		run: () => openGame(g.id),
+		onMap: g.umap
+			? () => {
+					ui.mapGame = g.id;
+					goToSection('space');
+				}
+			: undefined
 	}));
 
 	const traitItems: Item[] = data.traits.map((t) => ({
@@ -171,6 +179,11 @@
 		item.run();
 	}
 
+	function showOnMap(item: Item) {
+		close(false); // focus moves to the map section's heading
+		item.onMap?.();
+	}
+
 	function onWindowKey(e: KeyboardEvent) {
 		const typing =
 			e.target instanceof HTMLElement &&
@@ -201,7 +214,8 @@
 			active = n - 1;
 		} else if (e.key === 'Enter' && flat[active]) {
 			e.preventDefault();
-			run(flat[active]);
+			if (e.shiftKey && flat[active].onMap) showOnMap(flat[active]);
+			else run(flat[active]);
 		} else if (e.key === 'Escape') {
 			e.preventDefault();
 			e.stopPropagation();
@@ -269,6 +283,7 @@
 					aria-controls="cmd-list"
 					aria-autocomplete="list"
 					aria-activedescendant={flat[active] ? `cmd-${flat[active].id}` : undefined}
+					aria-describedby="cmd-help"
 					placeholder="Search games, sections, traits…"
 					autocomplete="off"
 					spellcheck="false"
@@ -276,9 +291,11 @@
 				<kbd aria-hidden="true">Esc</kbd>
 			</div>
 			<div id="cmd-list" role="listbox" aria-label="Results" class="list">
-				{#each groups as g (g.name)}
-					<div role="group" aria-labelledby="cmd-h-{g.name}">
-						<div class="group" id="cmd-h-{g.name}" role="presentation">{g.name}</div>
+				{#each groups as g, gi (g.name)}
+					<div role="group" aria-labelledby="cmd-h-{gi}">
+						<div class="group" id="cmd-h-{gi}" role="presentation">
+							{g.name}
+						</div>
 						{#each g.items as item (item.id)}
 							{@const i = flat.indexOf(item)}
 							<!-- svelte-ignore a11y_click_events_have_key_events -->
@@ -292,7 +309,21 @@
 								onclick={() => run(item)}
 							>
 								<span class="label">{item.label}</span>
-								{#if item.hint}<span class="hint">{item.hint}</span>{/if}
+								<span class="right">
+									{#if item.hint}<span class="hint">{item.hint}</span>{/if}
+									{#if item.onMap}
+										<!-- Pointer shortcut; keyboard users get Shift+Enter (see #cmd-help). -->
+										<span
+											class="map"
+											aria-hidden="true"
+											title="Show {item.label} and similar games on the 3D map"
+											onclick={(e) => {
+												e.stopPropagation();
+												showOnMap(item);
+											}}>3D map</span
+										>
+									{/if}
+								</span>
 							</div>
 						{/each}
 					</div>
@@ -303,8 +334,13 @@
 			<div class="foot" aria-hidden="true">
 				<span><kbd>↑</kbd><kbd>↓</kbd> move</span>
 				<span><kbd>↵</kbd> open</span>
+				{#if flat[active]?.onMap}<span><kbd>⇧</kbd><kbd>↵</kbd> show on 3D map</span>{/if}
 				<span><kbd>Esc</kbd> close</span>
 			</div>
+			<p id="cmd-help" class="visually-hidden">
+				Enter opens the result. For a game in the top 1,000, Shift+Enter shows it and similar games
+				on the 3D map.
+			</p>
 			<div class="visually-hidden" role="status" aria-live="polite">{status}</div>
 		</div>
 	</div>
@@ -453,6 +489,35 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		white-space: nowrap;
+	}
+	.right {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+		flex: none;
+	}
+	.map {
+		font-size: 0.72rem;
+		font-weight: 600;
+		padding: 0.15rem 0.45rem;
+		border-radius: 999px;
+		border: 1px solid var(--border);
+		color: var(--text-secondary);
+		background: var(--surface-1);
+		cursor: pointer;
+		visibility: hidden;
+	}
+	.opt[aria-selected='true'] .map {
+		visibility: visible;
+	}
+	.map:hover {
+		color: var(--text-primary);
+		border-color: var(--series-1);
+	}
+	@media (hover: none) {
+		.map {
+			visibility: visible;
+		}
 	}
 	.hint {
 		flex: none;

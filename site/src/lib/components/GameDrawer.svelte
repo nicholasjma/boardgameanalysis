@@ -38,6 +38,14 @@
 		}
 	}
 
+	function showOnMap(id: number) {
+		closeGame();
+		setTimeout(() => {
+			ui.mapGame = id;
+			goToSection('space');
+		});
+	}
+
 	function pickTrait(key: string) {
 		ui.trait = key;
 		closeGame();
@@ -159,7 +167,16 @@
 			</div>
 		</section>
 
-		<a class="out" href={bggUrl(game.id)} target="_blank" rel="noopener">View on BoardGameGeek ↗</a>
+		<div class="outs">
+			{#if game.umap}
+				<button class="chip" onclick={() => showOnMap(game.id)}
+					>Show similar games on the 3D map</button
+				>
+			{/if}
+			<a class="out" href={bggUrl(game.id)} target="_blank" rel="noopener"
+				>View on BoardGameGeek ↗</a
+			>
+		</div>
 	</div>
 {/if}
 
@@ -300,9 +317,15 @@
 		flex-wrap: wrap;
 		gap: 0.35rem;
 	}
+	.outs {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		gap: 0.75rem 1rem;
+		margin-top: 1.5rem;
+	}
 	.out {
 		display: inline-block;
-		margin-top: 1.5rem;
 		font-weight: 600;
 	}
 </style>
