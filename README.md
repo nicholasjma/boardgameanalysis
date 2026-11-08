@@ -1,4 +1,4 @@
-# What's in a BoardGameGeek rating?
+# Board Game Constellation
 
 An analysis of what predicts BoardGameGeek ratings: an XGBoost model that guesses each top
 game's average rating from only its year, play time, categories and mechanics, plus an

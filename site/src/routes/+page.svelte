@@ -46,10 +46,10 @@
 </script>
 
 <svelte:head>
-	<title>What's in a BoardGameGeek rating?</title>
+	<title>Board Game Constellation: a 3D map of BoardGameGeek's top games</title>
 	<meta
 		name="description"
-		content="An interactive analysis of what predicts BoardGameGeek ratings for the top {meta.games} board games."
+		content="Fly through a 3D map of BoardGameGeek's top 1,000 board games, find games like the ones you love, and see what drives their ratings."
 	/>
 </svelte:head>
 
@@ -58,7 +58,7 @@
 <header class="top" id="top">
 	<div class="inner">
 		<h1 class="brand">
-			<a href="#top" onclick={(e) => nav('', e)}>What’s in a <b>BGG</b> rating?</a>
+			<a href="#top" onclick={(e) => nav('', e)}>Board Game <b>Constellation</b></a>
 		</h1>
 		<ChapterMenu />
 		<div class="tools">

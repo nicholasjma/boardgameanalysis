@@ -46,7 +46,7 @@
 	let tip = $state<{ x: number; y: number } | null>(null);
 
 	const DEFAULT = { yaw: 0.6, pitch: -0.35, zoom: 1 };
-	const ZOOM = [0.6, 9] as const;
+	const ZOOM = [0.6, 60] as const;
 	let yaw = DEFAULT.yaw;
 	let pitch = DEFAULT.pitch;
 	let zoom = $state(DEFAULT.zoom);
@@ -54,6 +54,10 @@
 	let aim: Vec = [0, 0, 0];
 	let center: Vec = [0, 0, 0];
 	let zoomNow = DEFAULT.zoom;
+	// How far the camera sits from `center`, as a multiple of the default for this zoom. Turning
+	// re-pivots onto whatever is in the middle of the view, which changes this, not the picture.
+	let reach = 1;
+	let reachAim = 1;
 	let selected = $state<number | null>(null);
 	let listHover = $state<number | null>(null);
 	const similar = $derived(selected !== null ? similarTo(selected) : []);
@@ -197,7 +201,7 @@
 		const z2 = y0 * sp + z1 * cp;
 		// Zoomed in, the camera also moves closer, so nearby games spread out in depth.
 		const cam = CAM / Math.sqrt(zoomNow);
-		const depth = cam - z2;
+		const depth = cam * reach - z2;
 		if (depth < NEAR) return { x: NaN, y: NaN, z: z2, f: Infinity, vis: false };
 		const f = cam / depth;
 		const R = frame.r * zoomNow;
@@ -529,6 +533,33 @@
 		);
 	}
 
+	/**
+	 * Turn around what you are looking at. Moves the orbit point onto the game nearest the middle
+	 * of the view (the selected game if it is there), at that game's depth, without moving the
+	 * camera: the picture stays put and the next drag or arrow key pivots on that game rather
+	 * than on a point far ahead of the camera.
+	 */
+	function repivot() {
+		if (Math.hypot(...aim.map((v, i) => v - center[i])) > 0.01) return; // still flying somewhere
+		const near = (i: number) => (screen[i].x - frame.cx) ** 2 + (screen[i].y - frame.cy) ** 2;
+		const R2 = 90 ** 2;
+		let best: number | null = null;
+		if (selected !== null && screen[selected].vis && near(selected) < R2) best = selected;
+		else
+			screen.forEach((s, i) => {
+				if (s.vis && near(i) < R2 && (best === null || near(i) < near(best))) best = i;
+			});
+		if (best === null) return;
+		const cam = CAM / Math.sqrt(zoomNow);
+		const depth = cam * reach - screen[best].z;
+		if (depth < NEAR * 2) return;
+		const back = toWorld(0, 0, cam * reach);
+		const ahead = toWorld(0, 0, -depth);
+		center = center.map((c, k) => c + back[k] + ahead[k]) as Vec;
+		aim = [...center];
+		reach = reachAim = depth / cam;
+	}
+
 	function onDown(e: PointerEvent) {
 		touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
 		if (touches.size === 2) {
@@ -539,6 +570,7 @@
 		}
 		drag = { x: e.clientX, y: e.clientY, moved: 0 };
 		canvas!.setPointerCapture(e.pointerId);
+		repivot();
 		canvas!.style.cursor = ''; // let the grabbing hand show while dragging
 	}
 	function onMove(e: PointerEvent) {
@@ -630,6 +662,7 @@
 		fast = e.shiftKey;
 		if (FLY.has(k)) {
 			e.preventDefault();
+			if (k.startsWith('arrow') && !held.has(k)) repivot();
 			if (!held.has(k) && !e.repeat) move(k, 0.06); // a tap still nudges
 			held.add(k);
 			playing = false;
@@ -689,8 +722,13 @@
 		dirty = true;
 	}
 
-	const zoomBy = (k: number) => (zoom = Math.max(ZOOM[0], Math.min(ZOOM[1], zoom * k)));
+	/** Zoom toward whatever is in the middle of the view, not the middle of the whole map. */
+	function zoomBy(k: number) {
+		repivot();
+		zoom = Math.max(ZOOM[0], Math.min(ZOOM[1], zoom * k));
+	}
 	function reset() {
+		reachAim = 1;
 		yaw = DEFAULT.yaw;
 		pitch = DEFAULT.pitch;
 		zoom = DEFAULT.zoom;
@@ -702,6 +740,7 @@
 	let announce = $state('');
 	/** Fly to a game and list the games most like it. */
 	function select(i: number) {
+		reachAim = 1;
 		selected = i;
 		listHover = null;
 		ui.hoverGame = null;
@@ -737,6 +776,7 @@
 	}
 
 	function clearSelection() {
+		reachAim = 1;
 		selected = null;
 		zoom = DEFAULT.zoom;
 		aim = [0, 0, 0];
@@ -744,6 +784,7 @@
 		dirty = true;
 	}
 	function flyToRegion(id: number) {
+		reachAim = 1;
 		const r = regions.find((x) => x.id === id);
 		if (!r) return;
 		selected = null;
@@ -767,6 +808,7 @@
 
 	// The tour sets scenes as the reader scrolls through it.
 	function applyScene(s: Scene) {
+		reachAim = 1;
 		if (s.mode) mode = s.mode;
 		if (s.trait) ui.trait = s.trait;
 		if (s.game === null) selected = null;
@@ -873,9 +915,10 @@
 				// Ease the camera toward its aim and zoom.
 				const k = prefersReducedMotion.current ? 1 : 1 - Math.exp(-raw * 5);
 				const dc = Math.hypot(...aim.map((v, i) => v - center[i]));
-				if (dc > 1e-4 || Math.abs(zoom - zoomNow) > 1e-3) {
+				if (dc > 1e-4 || Math.abs(zoom - zoomNow) > 1e-3 || Math.abs(reachAim - reach) > 1e-3) {
 					center = center.map((v, i) => v + (aim[i] - v) * k) as Vec;
 					zoomNow += (zoom - zoomNow) * k;
+					reach += (reachAim - reach) * k;
 					dirty = true;
 				}
 				if (dirty) {
