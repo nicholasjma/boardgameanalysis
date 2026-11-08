@@ -4,22 +4,14 @@ export type Theme = 'light' | 'dark';
 export const themes: Theme[] = ['light', 'dark'];
 
 /**
- * Open the page in a theme with motion reduced, then scroll through it so every chart's
- * scroll-triggered entrance has run and the page is in its resting state.
+ * Open the page in a theme with motion reduced, and wait for the 3D map (home) to draw.
+ * Chapters open as panes over it; pass a hash path such as '/#recipe' to start in one.
  */
 export async function load(page: Page, theme: Theme, path = '/') {
 	await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: theme });
 	await page.addInitScript((t) => localStorage.setItem('theme', t), theme);
 	await page.goto(path);
-	await page.waitForFunction(() => document.querySelector('main svg') !== null);
-	await page.evaluate(async () => {
-		const step = innerHeight * 0.6;
-		for (let y = 0; y < document.body.scrollHeight; y += step) {
-			scrollTo(0, y);
-			await new Promise((r) => setTimeout(r, 40));
-		}
-		scrollTo(0, 0);
-	});
+	await page.waitForFunction(() => document.querySelector('#space canvas') !== null);
 	await page.waitForTimeout(300);
 }
 

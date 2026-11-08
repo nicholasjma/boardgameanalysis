@@ -184,8 +184,11 @@ def build_export(
                     "meanRating": _r(rated.loc[members.index, "avg_rating"].mean()),
                     "meanMagic": _r(rated.loc[members.index, "magic_sauce"].mean()),
                     "topGames": [int(i) for i in members.sort_values("rank").index[:8]],
+                    # The key keeps traits apart when a category and a mechanic share a
+                    # name (Deduction, Negotiation).
                     "traits": [
-                        {"name": strip_prefix(str(t)), "share": _r(s)} for t, s in share.items()
+                        {"key": str(t), "name": strip_prefix(str(t)), "share": _r(s)}
+                        for t, s in share.items()
                     ],
                 }
             )

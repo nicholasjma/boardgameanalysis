@@ -7,6 +7,24 @@ interactive site that explains the results.
 **Site:** https://nicholasjma.github.io/boardgameanalysis/ · **Original article (2018):**
 [What's in a BGG rating?](https://medium.com/@SoporificVacuum/whats-in-a-bgg-rating-5b769d53e2ac)
 
+## The site
+
+The 3D map of the top 1,000 games is the home screen; everything else opens over it.
+
+- **Fly it**: <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> to move, <kbd>Q</kbd>/<kbd>E</kbd>
+  down and up, arrows or drag to look, scroll or pinch to zoom, <kbd>[</kbd>/<kbd>]</kbd> to step
+  through the ranking. Click a game (or its label) to fly to it and list its most similar games.
+- **Semantic zoom**: far out, the map names its regions (k-means on the embedding, named by their
+  most over-represented traits); closer, game names; up close, cards with rank, year and rating;
+  closest, the traits each game is built from.
+- **Semantic scroll**: the guided tour is a story told in the side panel. Scrolling it, or
+  scrolling over the map while it runs, flies the camera and recolours the map step by step.
+- **Chapters**: the analysis (recipe, predicted vs actual, magic sauce, trait explorer, families,
+  2018 comparison, all games, methods) opens as panes over the map, with their own URLs
+  (`#recipe`) and back-button support. Any game anywhere links back to its place on the map.
+- **⌘K / Ctrl+K**: jump to any game, chapter or trait. Enter flies to a game or lights up a trait
+  on the map; Shift+Enter opens its details.
+
 ## Quick start
 
 Requires [uv](https://docs.astral.sh/uv/) and Node 22+.
@@ -93,14 +111,15 @@ and runs the accessibility suite.
 The site targets WCAG 2.2 AA, and `site/tests/` checks it on every push, in light and dark themes,
 at desktop and phone sizes:
 
-- **axe-core** scan of the whole page, plus the command palette and game drawer while open.
+- **axe-core** scan of the map, every chapter pane, the guided tour, and the command palette and
+  game drawer while open.
 - **Text contrast** of every visible text run, including SVG chart labels (which axe skips),
   composited over its real background; and the colour tokens themselves against each surface.
 - **Keyboard**: skip link, ⌘K / Ctrl+K and `/` open the command palette, focus is trapped in
   dialogs and returned on close, and every control shows a visible focus indicator.
 
-Every chart has a table view, honours `prefers-reduced-motion`, and the 3D map can be driven
-from the keyboard.
+Every chart has a table view and honours `prefers-reduced-motion`; the 3D map can be flown,
+searched and stepped through entirely from the keyboard, and its panel lists every game.
 `pages.yml` regenerates the data and deploys the site to GitHub Pages on every push to `master`.
 
 ## Layout

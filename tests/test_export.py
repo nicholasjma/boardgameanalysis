@@ -59,6 +59,10 @@ def test_export_is_consistent(doc: dict, tmp_path: Path) -> None:  # type: ignor
         assert len(g["dist"]) == 10
         assert all(0 <= t < len(doc["traitKeys"]) for t in g["traits"])
 
+    for c in doc["clusters"]:
+        keys = [t["key"] for t in c["traits"]]
+        assert len(keys) == len(set(keys)), c["name"]
+
     cmp = doc["compare"]
     assert cmp["retained"] <= cmp["top"]
     assert all(0 <= s["then"] <= 1 and 0 <= s["now"] <= 1 for s in cmp["shifts"])
