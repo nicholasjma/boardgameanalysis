@@ -78,12 +78,29 @@ cd site
 npm run lint      # prettier + eslint
 npm run check     # svelte-check / TypeScript
 npm run build     # static build into site/build
+npm test          # Playwright: axe, contrast and keyboard tests (after build;
+                  # first run: npx playwright install chromium)
 ```
 
 Python dependencies are declared as compatible ranges in `pyproject.toml` and pinned exactly in
 `uv.lock`; site dependencies are pinned exactly in `site/package.json` and `package-lock.json`.
 
-CI (`.github/workflows/ci.yml`) runs lint, types and tests on Python 3.11–3.13 and builds the site.
+CI (`.github/workflows/ci.yml`) runs lint, types and tests on Python 3.11–3.13, builds the site,
+and runs the accessibility suite.
+
+## Accessibility
+
+The site targets WCAG 2.2 AA, and `site/tests/` checks it on every push, in light and dark themes,
+at desktop and phone sizes:
+
+- **axe-core** scan of the whole page, plus the command palette and game drawer while open.
+- **Text contrast** of every visible text run, including SVG chart labels (which axe skips),
+  composited over its real background; and the colour tokens themselves against each surface.
+- **Keyboard**: skip link, ⌘K / Ctrl+K and `/` open the command palette, focus is trapped in
+  dialogs and returned on close, and every control shows a visible focus indicator.
+
+Every chart has a table view, honours `prefers-reduced-motion`, and the 3D map can be driven
+from the keyboard.
 `pages.yml` regenerates the data and deploys the site to GitHub Pages on every push to `master`.
 
 ## Layout

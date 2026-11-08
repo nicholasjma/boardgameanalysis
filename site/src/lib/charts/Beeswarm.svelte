@@ -65,10 +65,10 @@
 		<line class="zero" x1={x(0)} x2={x(0)} y1={m.top - 4} y2={height - m.bottom} />
 		{#each rows as r, i (r.feature)}
 			{@const cy = m.top + i * rowH + rowH / 2}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<g
 				class="row"
 				class:dim={hover !== null && hover.i !== i}
-				role="listitem"
 				onpointerenter={() => (hover = { i, y: cy })}
 				onpointerleave={() => (hover = null)}
 			>

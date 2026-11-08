@@ -65,7 +65,7 @@
 	<svg
 		{width}
 		{height}
-		role="img"
+		role="group"
 		aria-label="Games rated furthest above and below their predicted rating"
 	>
 		<line class="zero" x1={x(0)} x2={x(0)} y1="0" y2={height - 26} />
@@ -76,14 +76,13 @@
 						class="row"
 						role="button"
 						tabindex="0"
-						aria-label="{g.name}: {fmt.signed(g.magic)}"
 						onclick={() => openGame(g.id)}
 						onkeydown={(e) => e.key === 'Enter' && openGame(g.id)}
 					>
 						<rect class="hit" x="0" y="0" {width} height={rowH} />
 						<text class="name" x={labelW - 4} y={rowH / 2} dy="0.35em" text-anchor="end">
 							<tspan class="rank">#{g.rank}</tspan>
-							<title>{g.name}</title>{fit(g.name, labelW - 48)}
+							{fit(g.name, labelW - 48)}
 						</text>
 						<path
 							d={bar(g.magic)}
@@ -146,6 +145,8 @@
 	}
 	.row:focus-visible .hit {
 		fill: var(--surface-2);
+		stroke: var(--series-1);
+		stroke-width: 2px;
 	}
 	.hit {
 		fill: transparent;

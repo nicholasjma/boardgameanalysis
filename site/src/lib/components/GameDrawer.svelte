@@ -1,8 +1,9 @@
 <script lang="ts">
 	import { fly, fade } from 'svelte/transition';
 	import { cubicOut } from 'svelte/easing';
+	import { prefersReducedMotion } from 'svelte/motion';
 	import { bggUrl, data, fmt, gamesById } from '#lib/data.ts';
-	import { closeGame, ui } from '#lib/state.svelte.ts';
+	import { closeGame, goToSection, ui } from '#lib/state.svelte.ts';
 	import Waterfall from '#lib/charts/Waterfall.svelte';
 
 	const game = $derived(ui.game === null ? null : (gamesById.get(ui.game) ?? null));
@@ -16,20 +17,45 @@
 	});
 
 	function onKey(e: KeyboardEvent) {
-		if (e.key === 'Escape' && ui.game !== null) closeGame();
+		if (e.key === 'Escape' && ui.game !== null && !ui.palette) closeGame();
+	}
+
+	/** Modal: keep Tab and Shift+Tab cycling inside the drawer. */
+	function trap(e: KeyboardEvent) {
+		if (e.key !== 'Tab' || !panel) return;
+		const items = [
+			...panel.querySelectorAll<HTMLElement>('a[href], button, [tabindex="0"], summary')
+		].filter((el) => el.getClientRects().length);
+		if (!items.length) return;
+		const [first, last] = [items[0], items[items.length - 1]];
+		const here = document.activeElement;
+		if (e.shiftKey && (here === first || here === panel)) {
+			e.preventDefault();
+			last.focus();
+		} else if (!e.shiftKey && here === last) {
+			e.preventDefault();
+			first.focus();
+		}
 	}
 
 	function pickTrait(key: string) {
 		ui.trait = key;
 		closeGame();
-		document.getElementById('traits')?.scrollIntoView({ behavior: 'smooth' });
+		setTimeout(() => goToSection('traits'));
 	}
+
+	const dur = (ms: number) => (prefersReducedMotion.current ? 0 : ms);
 </script>
 
 <svelte:window onkeydown={onKey} />
 
 {#if game}
-	<button class="scrim" aria-label="Close" onclick={closeGame} transition:fade={{ duration: 180 }}
+	<button
+		class="scrim"
+		tabindex="-1"
+		aria-label="Close details"
+		onclick={closeGame}
+		transition:fade={{ duration: dur(180) }}
 	></button>
 	<div
 		class="drawer"
@@ -38,15 +64,16 @@
 		aria-labelledby="drawer-title"
 		tabindex="-1"
 		bind:this={panel}
-		transition:fly={{ x: 420, duration: 320, easing: cubicOut }}
+		onkeydown={trap}
+		transition:fly={{ x: 420, duration: dur(320), easing: cubicOut }}
 	>
-		<header>
+		<div class="head">
 			<div>
 				<p class="eyebrow">#{game.rank} on BoardGameGeek · {game.year}</p>
 				<h2 id="drawer-title">{game.name}</h2>
 			</div>
 			<button class="close" onclick={closeGame} aria-label="Close details">×</button>
-		</header>
+		</div>
 
 		<div class="kpis">
 			<div><span class="k">Actual</span><span class="n">{fmt.r2(game.rating)}</span></div>
@@ -159,7 +186,7 @@
 		padding: 1.25rem 1.4rem 2rem;
 		outline: none;
 	}
-	header {
+	.head {
 		display: flex;
 		justify-content: space-between;
 		gap: 1rem;
@@ -176,6 +203,9 @@
 		cursor: pointer;
 		color: var(--text-muted);
 		align-self: start;
+		min-width: 36px;
+		min-height: 36px;
+		border-radius: 8px;
 	}
 	.kpis {
 		display: grid;

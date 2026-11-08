@@ -6,7 +6,9 @@
 	--surface-2: #f3f2ee;
 	--text-primary: #0b0b0b;
 	--text-secondary: #52514e;
-	--text-muted: #898781;
+	/* Muted text clears 4.5:1 on every surface (tests/a11y.spec.ts checks this). */
+	--text-muted: #6f6d67;
+	--link: #1f68c0;
 	--grid: #e1e0d9;
 	--axis: #c3c2b7;
 	--border: rgba(11, 11, 11, 0.1);
@@ -38,7 +40,8 @@
 		--surface-2: #232321;
 		--text-primary: #f0efec;
 		--text-secondary: #c3c2b7;
-		--text-muted: #898781;
+		--text-muted: #94928b;
+		--link: #5598e7;
 		--grid: #2c2c2a;
 		--axis: #383835;
 		--border: rgba(255, 255, 255, 0.1);
@@ -66,7 +69,8 @@
 	--surface-2: #232321;
 	--text-primary: #f0efec;
 	--text-secondary: #c3c2b7;
-	--text-muted: #898781;
+	--text-muted: #94928b;
+	--link: #5598e7;
 	--grid: #2c2c2a;
 	--axis: #383835;
 	--border: rgba(255, 255, 255, 0.1);
@@ -130,7 +134,7 @@ p {
 }
 
 a {
-	color: var(--series-1);
+	color: var(--link);
 	text-underline-offset: 3px;
 }
 
@@ -312,5 +316,44 @@ details.table-view .scroll {
 	*::after {
 		animation-duration: 0.01ms !important;
 		transition-duration: 0.01ms !important;
+	}
+}
+
+.skip-link {
+	position: fixed;
+	top: 0.5rem;
+	left: 0.5rem;
+	z-index: 100;
+	padding: 0.5rem 0.9rem;
+	border-radius: 8px;
+	background: var(--text-primary);
+	color: var(--page);
+	font-weight: 600;
+	text-decoration: none;
+	transform: translateY(-200%);
+}
+
+.skip-link:focus-visible {
+	transform: none;
+}
+
+/* Programmatic focus targets (main, section headings) don't need a ring. */
+main:focus,
+[tabindex='-1']:focus:not(:focus-visible) {
+	outline: none;
+}
+
+/* Sections land below the sticky header. */
+section[id],
+main {
+	scroll-margin-top: 4.5rem;
+}
+
+@media (forced-colors: active) {
+	.chip[aria-pressed='true'] {
+		border: 2px solid CanvasText;
+	}
+	svg [fill]:not([fill='none']) {
+		forced-color-adjust: none;
 	}
 }

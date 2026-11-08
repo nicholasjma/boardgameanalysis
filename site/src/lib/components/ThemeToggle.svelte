@@ -1,31 +1,18 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
+	import { initTheme, toggleTheme, ui } from '#lib/state.svelte.ts';
 
-	let theme = $state<'light' | 'dark'>('light');
-
-	onMount(() => {
-		const saved = localStorage.getItem('theme');
-		theme =
-			saved === 'light' || saved === 'dark'
-				? saved
-				: matchMedia('(prefers-color-scheme: dark)').matches
-					? 'dark'
-					: 'light';
-	});
-
-	function toggle() {
-		theme = theme === 'dark' ? 'light' : 'dark';
-		document.documentElement.dataset.theme = theme;
-		localStorage.setItem('theme', theme);
-	}
+	onMount(initTheme);
 </script>
 
 <button
 	class="toggle"
-	onclick={toggle}
-	aria-label="Switch to {theme === 'dark' ? 'light' : 'dark'} theme"
+	onclick={toggleTheme}
+	aria-label="Dark theme"
+	aria-pressed={ui.theme === 'dark'}
+	title="Toggle dark theme"
 >
-	{#if theme === 'dark'}
+	{#if ui.theme === 'dark'}
 		<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
 			<circle cx="12" cy="12" r="4.5" />
 			<path
@@ -46,8 +33,8 @@
 		background: var(--surface-1);
 		border: 1px solid var(--border);
 		border-radius: 999px;
-		width: 34px;
-		height: 34px;
+		width: 36px;
+		height: 36px;
 		display: grid;
 		place-items: center;
 		cursor: pointer;
