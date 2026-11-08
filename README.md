@@ -64,6 +64,7 @@ BGG's XML API requires a registered application token
   sums exactly to its prediction.
 - "Magic sauce" = actual rating − predicted rating.
 - Families: Ward hierarchical clustering on the top 500 games' trait vectors.
+- 3D game space: UMAP (Jaccard distance, 15 neighbours) on the top 1,000 games' trait vectors.
 
 ## Development
 
@@ -94,6 +95,7 @@ src/boardgameanalysis/   Python package
   features.py              filtering and one-hot trait features
   model.py                 cross-validated XGBoost + SHAP
   clustering.py            Ward clustering and t-SNE
+  embedding.py             3D UMAP for the site's game space
   plots.py                 static matplotlib/plotly figures
   export.py                JSON for the site
   cli.py                   `boardgameanalysis` command

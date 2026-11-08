@@ -12,3 +12,15 @@ export function eraIndex(year: number): number {
 }
 
 export const eraColor = (year: number) => `var(--ord-${eraIndex(year) + 1})`;
+
+/** Average-rating bands on the same ramp, used by the family map and the 3D map. */
+export const ratingBands = [
+	{ label: 'Under 7.6', max: 7.6 },
+	{ label: '7.6–7.9', max: 7.9 },
+	{ label: '7.9–8.2', max: 8.2 },
+	{ label: '8.2–8.5', max: 8.5 },
+	{ label: '8.5+', max: Infinity }
+] as const;
+
+/** 1-based band index, matching the --ord-N custom properties. */
+export const ratingBand = (r: number) => ratingBands.findIndex((b) => r < b.max) + 1;

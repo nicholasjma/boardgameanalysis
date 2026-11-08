@@ -61,3 +61,15 @@ def test_clustering(games: pd.DataFrame) -> None:
     assert len(clusters.names) == 5
     assert clusters.games["rank"].max() <= 500
     assert set(clusters.games["cluster"]) == set(range(5))
+
+
+def test_umap_3d(games: pd.DataFrame) -> None:
+    from boardgameanalysis.embedding import umap_3d
+
+    f = build_features(games)
+    emb = umap_3d(f, top=300)
+    assert list(emb.columns) == ["umap_x", "umap_y", "umap_z"]
+    assert emb.index.equals(f.data.sort_values("rank").index[:300])
+    radius = np.linalg.norm(emb.to_numpy(), axis=1)
+    assert radius.max() == pytest.approx(1.0)
+    assert np.allclose(emb.mean().to_numpy(), 0, atol=1e-9)

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { hierarchy, pack, type HierarchyCircularNode } from 'd3';
 	import { data, fit, fmt, gamesById, type Game } from '#lib/data.ts';
+	import { ratingBand, ratingBands } from '#lib/era.ts';
 	import { inview } from '#lib/inview.ts';
 	import { openGame } from '#lib/state.svelte.ts';
 	import Tooltip from '#lib/components/Tooltip.svelte';
@@ -8,14 +9,8 @@
 	type Node = { name: string; cluster?: number; game?: Game; children?: Node[]; value?: number };
 
 	const mapped = data.games.filter((g) => g.cluster !== undefined);
-	const bands = [
-		{ label: 'Under 7.6', max: 7.6 },
-		{ label: '7.6–7.9', max: 7.9 },
-		{ label: '7.9–8.2', max: 8.2 },
-		{ label: '8.2–8.5', max: 8.5 },
-		{ label: '8.5+', max: Infinity }
-	];
-	const band = (r: number) => bands.findIndex((b) => r < b.max) + 1;
+	const bands = ratingBands;
+	const band = ratingBand;
 
 	const tree: Node = {
 		name: 'root',
