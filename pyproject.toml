@@ -1,0 +1,89 @@
+[project]
+name = "boardgameanalysis"
+version = "0.2.0"
+description = "Fetch live BoardGameGeek data and analyze what drives game ratings."
+readme = "README.md"
+requires-python = ">=3.11"
+authors = [{ name = "Nick Ma", email = "me@nick.ma" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+# Compatible ranges for library consumers; exact versions are pinned in uv.lock.
+dependencies = [
+    "httpx>=0.28,<1",
+    "matplotlib>=3.9,<4",
+    "numpy>=2.0,<3",
+    "pandas>=2.2,<4",
+    "plotly>=6.0,<8",
+    "scikit-learn>=1.6,<2",
+    "scipy>=1.14,<2",
+    "shap>=0.47,<1",
+    "statsmodels>=0.14,<1",
+    "xgboost>=2.1,<4",
+]
+
+[project.urls]
+Repository = "https://github.com/nicholasjma/boardgameanalysis"
+Article = "https://medium.com/@SoporificVacuum/whats-in-a-bgg-rating-5b769d53e2ac"
+
+[project.scripts]
+boardgameanalysis = "boardgameanalysis.cli:main"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.13",
+    "pandas-stubs>=2.2",
+    "pre-commit>=4.0",
+    "pytest>=8.3",
+    "pytest-cov>=6.0",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/boardgameanalysis"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+extend-exclude = ["legacy"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",  # pycodestyle
+    "F",       # pyflakes
+    "I",       # isort
+    "B",       # bugbear
+    "UP",      # pyupgrade
+    "SIM",     # simplify
+    "PD",      # pandas-vet
+    "NPY",     # numpy
+    "RUF",
+    "PTH",     # use pathlib
+    "C4",      # comprehensions
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PD"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["shap", "shap.*", "sklearn.*", "statsmodels.*", "scipy.*", "plotly.*", "xgboost.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers", "--import-mode=importlib"]
