@@ -189,7 +189,7 @@
 			<svg
 				width={mw}
 				height={movers.length * rowH + 30}
-				role="img"
+				role="group"
 				aria-label="Rank change for the biggest movers"
 			>
 				<g class="grid">
@@ -203,13 +203,13 @@
 						class="mrow"
 						role="button"
 						tabindex="0"
-						aria-label="{g.name}: #{g.then.rank} to #{g.rank}"
+						aria-describedby="mv-{g.id}"
 						onclick={() => openGame(g.id)}
 						onkeydown={(e) => e.key === 'Enter' && openGame(g.id)}
 					>
 						<rect class="hit" x="0" y={cy - rowH / 2} width={mw} height={rowH} />
 						<text class="name" x={mLabel} y={cy} dy="0.35em" text-anchor="end"
-							><title>{g.name}</title>{fit(g.name, mLabel - 4)}</text
+							>{fit(g.name, mLabel - 4)}</text
 						>
 						<line class="bar" x1={rx(g.then.rank)} x2={rx(g.rank)} y1={cy} y2={cy} />
 						<circle cx={rx(g.then.rank)} {cy} r="5" class="then" />
@@ -222,6 +222,11 @@
 					{/each}
 				</g>
 			</svg>
+			<div class="visually-hidden">
+				{#each movers as g (g.id)}
+					<span id="mv-{g.id}">Rank #{g.then.rank} in {thenLabel}, #{g.rank} in {nowLabel}</span>
+				{/each}
+			</div>
 		</div>
 		<p class="foot">Rank axis is logarithmic; better ranks to the right.</p>
 	</div>
@@ -304,6 +309,11 @@
 	.mrow:hover .name,
 	.mrow:focus-visible .name {
 		fill: var(--text-primary);
+	}
+	.mrow:focus-visible .hit {
+		fill: var(--surface-2);
+		stroke: var(--series-1);
+		stroke-width: 2px;
 	}
 	.row.dim {
 		opacity: 0.35;

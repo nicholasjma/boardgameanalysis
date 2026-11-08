@@ -43,11 +43,11 @@
 	<svg {width} {height} role="img" aria-label="Bar chart of the {n} most influential features">
 		{#each rows as r, i (r.feature)}
 			{@const w = shown ? Math.max(2, x(r.meanAbs)) : 0}
+			<!-- svelte-ignore a11y_no_static_element_interactions -->
 			<g
 				transform="translate(0,{i * rowH})"
 				class="row"
 				class:dim={hover !== null && hover !== i}
-				role="listitem"
 				onpointerenter={() => (hover = i)}
 				onpointerleave={() => (hover = null)}
 			>

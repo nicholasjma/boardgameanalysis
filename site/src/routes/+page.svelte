@@ -14,9 +14,10 @@
 	import Waterfall from '#lib/charts/Waterfall.svelte';
 	import StatTile from '#lib/components/StatTile.svelte';
 	import GameDrawer from '#lib/components/GameDrawer.svelte';
-	import GameSearch from '#lib/components/GameSearch.svelte';
+	import CommandPalette from '#lib/components/CommandPalette.svelte';
 	import GameTable from '#lib/components/GameTable.svelte';
 	import ThemeToggle from '#lib/components/ThemeToggle.svelte';
+	import { onMount } from 'svelte';
 	import { openGame } from '#lib/state.svelte.ts';
 
 	const { meta, compare } = data;
@@ -41,6 +42,27 @@
 		['change', 'Since 2018'],
 		['games', 'All games']
 	] as const;
+
+	// Scrollspy: mark the section in view as the current location in the nav.
+	let current = $state<string | null>(null);
+	onMount(() => {
+		const visible: Record<string, number> = {};
+		const io = new IntersectionObserver(
+			(entries) => {
+				for (const e of entries) visible[e.target.id] = e.isIntersecting ? e.intersectionRatio : 0;
+				const best = Object.entries(visible)
+					.filter(([, r]) => r > 0)
+					.sort((a, b) => b[1] - a[1])[0];
+				current = best?.[0] ?? null;
+			},
+			{ rootMargin: '-30% 0px -50% 0px', threshold: [0, 0.01, 0.25, 0.5] }
+		);
+		for (const [id] of sections) {
+			const el = document.getElementById(id);
+			if (el) io.observe(el);
+		}
+		return () => io.disconnect();
+	});
 </script>
 
 <svelte:head>
@@ -51,22 +73,24 @@
 	/>
 </svelte:head>
 
-<header class="top">
+<a class="skip-link" href="#content">Skip to content</a>
+
+<header class="top" id="top">
 	<div class="inner">
 		<a class="brand" href="#top">What’s in a <b>BGG</b> rating?</a>
 		<nav aria-label="Sections">
 			{#each sections as [id, label] (id)}
-				<a href="#{id}">{label}</a>
+				<a href="#{id}" aria-current={current === id ? 'location' : undefined}>{label}</a>
 			{/each}
 		</nav>
 		<div class="tools">
-			<GameSearch />
+			<CommandPalette {sections} />
 			<ThemeToggle />
 		</div>
 	</div>
 </header>
 
-<main id="top">
+<main id="content" tabindex="-1">
 	<section class="hero">
 		<div class="wide">
 			<p class="eyebrow">BoardGameGeek top {fmt.int(meta.games)} · {snapshotDate}</p>
@@ -293,7 +317,7 @@
 		</div>
 	</section>
 
-	<section class="block methods">
+	<section id="methods" class="block methods">
 		<div class="wide grid-2">
 			<div class="prose">
 				<h3>Method</h3>
@@ -373,8 +397,15 @@
 		font-size: 0.85rem;
 		white-space: nowrap;
 	}
-	nav a:hover {
+	nav a:hover,
+	nav a[aria-current] {
 		color: var(--text-primary);
+	}
+	nav a[aria-current] {
+		text-decoration: underline;
+		text-decoration-color: var(--series-1);
+		text-decoration-thickness: 2px;
+		text-underline-offset: 6px;
 	}
 	.tools {
 		display: flex;
@@ -473,7 +504,7 @@
 		background: none;
 		border: 0;
 		padding: 0;
-		color: var(--series-1);
+		color: var(--link);
 		text-decoration: underline;
 		text-underline-offset: 3px;
 		cursor: pointer;

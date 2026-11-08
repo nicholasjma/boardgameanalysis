@@ -77,7 +77,7 @@
 			<svg
 				{width}
 				{height}
-				role="img"
+				role="group"
 				aria-label="The top {mapped.length} games packed into {groups.length} families by shared categories and mechanics"
 			>
 				{#each groups as gnode, gi (gnode.data.cluster)}
