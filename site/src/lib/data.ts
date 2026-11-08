@@ -21,6 +21,7 @@ export interface Game {
 	then?: { rank: number; rating: number };
 	cluster?: number;
 	tsne?: [number, number];
+	umap?: [number, number, number];
 	why?: { base: number; parts: [string, number][]; other: number };
 }
 

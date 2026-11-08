@@ -9,6 +9,7 @@
 	import RankMagic from '#lib/charts/RankMagic.svelte';
 	import TraitExplorer from '#lib/charts/TraitExplorer.svelte';
 	import GameMap from '#lib/charts/GameMap.svelte';
+	import Umap3D from '#lib/charts/Umap3D.svelte';
 	import ThenNow from '#lib/charts/ThenNow.svelte';
 	import Waterfall from '#lib/charts/Waterfall.svelte';
 	import StatTile from '#lib/components/StatTile.svelte';
@@ -28,6 +29,7 @@
 		year: 'numeric',
 		timeZone: 'UTC'
 	});
+	const umapCount = data.games.filter((g) => g.umap).length;
 	const yearsTop = data.importance.findIndex((i) => i.feature === 'Year published') + 1;
 	const sections = [
 		['recipe', 'The recipe'],
@@ -35,6 +37,7 @@
 		['magic', 'Magic sauce'],
 		['traits', 'Trait explorer'],
 		['map', 'Game map'],
+		['space', '3D map'],
 		['change', 'Since 2018'],
 		['games', 'All games']
 	] as const;
@@ -246,10 +249,27 @@
 		</div>
 	</section>
 
+	<section id="space" class="block">
+		<div class="wide">
+			<p class="eyebrow">06 · Game space</p>
+			<h2>The top {umapCount.toLocaleString('en-US')} in three dimensions</h2>
+			<div class="prose">
+				<p>
+					UMAP squeezes each game's {data.meta.categories + data.meta.mechanics} category and mechanic
+					flags into three coordinates, keeping games that share traits (by Jaccard similarity) close
+					together. Dense knots are genres the hobby keeps returning to; loners are games with an unusual
+					mix. Colour by rating or year to see whether the best-rated games bunch up, or pick a trait
+					to see where it lives.
+				</p>
+			</div>
+			<Umap3D />
+		</div>
+	</section>
+
 	{#if compare}
 		<section id="change" class="block">
 			<div class="wide">
-				<p class="eyebrow">06 · Since 2018</p>
+				<p class="eyebrow">07 · Since 2018</p>
 				<h2>Seven years of the BGG top {fmt.int(compare.top)}</h2>
 				<div class="prose">
 					<p>
@@ -267,7 +287,7 @@
 
 	<section id="games" class="block">
 		<div class="wide">
-			<p class="eyebrow">07 · All games</p>
+			<p class="eyebrow">08 · All games</p>
 			<h2>Every game, every number</h2>
 			<div class="card"><GameTable /></div>
 		</div>

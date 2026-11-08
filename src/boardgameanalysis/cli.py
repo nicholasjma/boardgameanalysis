@@ -129,6 +129,7 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--min-votes", type=int, default=500)
     e.add_argument("--base-year", type=int, default=2000)
     e.add_argument("--clusters", type=int, default=11)
+    e.add_argument("--umap-top", type=int, default=1000, help="games in the 3D UMAP (0 = skip)")
     e.add_argument("--perplexity", type=float, default=30.0, help="t-SNE perplexity for the map")
     e.set_defaults(func=_export)
 
@@ -151,6 +152,7 @@ def _import_kaggle(args: argparse.Namespace) -> int:
 def _export(args: argparse.Namespace) -> int:
     from boardgameanalysis.clustering import cluster_games
     from boardgameanalysis.dataset import load_games
+    from boardgameanalysis.embedding import umap_3d
     from boardgameanalysis.export import build_export, write_export
     from boardgameanalysis.features import build_features
     from boardgameanalysis.model import cross_validate, with_predictions
@@ -174,6 +176,7 @@ def _export(args: argparse.Namespace) -> int:
         base_year=args.base_year,
         compare=load_games(args.compare) if str(args.compare) not in ("", ".") else None,
         compare_snapshot=args.compare_snapshot,
+        embedding=umap_3d(features, top=args.umap_top) if args.umap_top > 0 else None,
     )
     path = write_export(doc, args.out)
     log.info("Wrote %s (%.0f KB, RMSE %.4f)", path, path.stat().st_size / 1024, result.rmse)

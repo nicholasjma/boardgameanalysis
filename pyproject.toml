@@ -23,6 +23,7 @@ dependencies = [
     "scipy>=1.14,<2",
     "shap>=0.47,<1",
     "statsmodels>=0.14,<1",
+    "umap-learn>=0.5.7,<0.6",
     "xgboost>=2.1,<4",
 ]
 
@@ -81,7 +82,7 @@ warn_unreachable = true
 files = ["src", "tests"]
 
 [[tool.mypy.overrides]]
-module = ["shap", "shap.*", "sklearn.*", "statsmodels.*", "scipy.*", "plotly.*", "xgboost.*"]
+module = ["shap", "shap.*", "sklearn.*", "statsmodels.*", "scipy.*", "plotly.*", "xgboost.*", "umap", "umap.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

@@ -55,6 +55,7 @@ def build_export(
     base_year: int,
     compare: pd.DataFrame | None = None,
     compare_snapshot: str | None = None,
+    embedding: pd.DataFrame | None = None,
     beeswarm_features: int = 16,
     waterfall_parts: int = 6,
     beeswarm_points: int = 500,
@@ -116,6 +117,7 @@ def build_export(
 
     # --- Games --------------------------------------------------------------------------------
     cl: dict[Any, Any] = clusters.games.to_dict("index") if clusters is not None else {}
+    emb: dict[Any, Any] = embedding.to_dict("index") if embedding is not None else {}
     then_map: dict[Any, Any] = (
         compare[["rank", "avg_rating"]].dropna().to_dict("index") if compare is not None else {}
     )
@@ -163,6 +165,9 @@ def build_export(
             info = cl[gid]
             g["cluster"] = int(info["cluster"])
             g["tsne"] = [_r(info["tsne_x"], 2), _r(info["tsne_y"], 2)]
+        if gid in emb:
+            e = emb[gid]
+            g["umap"] = [_r(e["umap_x"]), _r(e["umap_y"]), _r(e["umap_z"])]
         games.append(g)
 
     # --- Clusters ------------------------------------------------------------------------------
